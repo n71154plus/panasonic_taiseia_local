@@ -1,0 +1,16 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+.env
+.idea/
+.vscode/
+*.egg-info/
+.DS_Store
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/

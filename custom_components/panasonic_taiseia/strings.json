@@ -1,0 +1,50 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Panasonic TaiSEIA (Local)",
+        "description": "Control AC, dehumidifier, and refrigerator over LAN via UPnP SetSaanet / TaiSEIA 101.",
+        "data": {
+          "setup_mode": "Setup mode"
+        }
+      },
+      "discover": {
+        "title": "Select discovered device",
+        "description": "Scanned LAN port 57223 and SSDP.",
+        "data": {
+          "device": "Device",
+          "name": "Display name (optional)"
+        }
+      },
+      "manual": {
+        "title": "Manual setup",
+        "data": {
+          "host": "Host IP",
+          "name": "Display name (optional)",
+          "update_interval": "Update interval (seconds)"
+        }
+      },
+      "discover_confirm": {
+        "title": "Confirm device",
+        "description": "About to add: {name}"
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect. Check the IP and port 57223.",
+      "no_devices": "No devices found. Try manual IP entry."
+    },
+    "abort": {
+      "already_configured": "This device is already configured.",
+      "cannot_connect": "Cannot connect to the device."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "update_interval": "Update interval (seconds)"
+        }
+      }
+    }
+  }
+}
