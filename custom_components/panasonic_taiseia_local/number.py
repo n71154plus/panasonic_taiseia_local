@@ -1,19 +1,18 @@
-"""Number platform for Panasonic TaiSEIA local (timers)."""
+"""Number platform — APK CommandList range parameters (timers etc.)."""
 
 from __future__ import annotations
 
 from homeassistant.components.number import NumberEntity, NumberMode
 
 from .capability import timer_limits
+from .catalog import iter_kind, service_allowed
 from .const import (
     DATA_CLIENT,
     DATA_COORDINATOR,
+    DATA_PROFILE,
     DOMAIN,
-    NUMBER_DEFINITIONS_AC,
-    NUMBER_DEFINITIONS_DH,
     STATUS_POWER,
-    TYPE_AC,
-    TYPE_DEHUMIDIFIER,
+    UNIT_MINUTE,
 )
 from .entity import TaiSeiaBaseEntity
 
@@ -21,30 +20,33 @@ from .entity import TaiSeiaBaseEntity
 async def async_setup_entry(hass, entry, async_add_entities) -> bool:
     client = hass.data[DOMAIN][entry.entry_id][DATA_CLIENT]
     coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
-    sa_type = client.device.sa_type_id
-    if sa_type == TYPE_AC:
-        defs = NUMBER_DEFINITIONS_AC
-    elif sa_type == TYPE_DEHUMIDIFIER:
-        defs = NUMBER_DEFINITIONS_DH
-    else:
+    profile = hass.data[DOMAIN][entry.entry_id].get(DATA_PROFILE)
+    if not profile:
         return True
 
     entities = []
-    for row in defs:
-        service, status_key, label, icon, default_min, default_max, off_only, unit = row
-        if client.device.services and service not in client.device.services:
+    for item in iter_kind(profile, "number"):
+        if not service_allowed(client.device.services, item.command.service):
             continue
+        unit = item.command.unit or UNIT_MINUTE
+        # Dehumidifier timers in APK are often hours (max 12)
+        lo = item.range_min if item.range_min is not None else 0
+        hi = item.range_max if item.range_max is not None else 1440
+        if hi <= 24 and "時間" in item.command.name:
+            unit = "小時"
+        # On-timer typically only when powered off
+        off_only = "開" in item.command.name and "關" not in item.command.name
         entities.append(
             TaiSeiaTimerNumber(
                 coordinator,
                 client,
                 entry.entry_id,
-                service=service,
-                status_key=status_key,
-                number_label=label,
-                icon_name=icon,
-                default_min=default_min,
-                default_max=default_max,
+                service=item.command.service,
+                status_key=item.command.status_key,
+                number_label=item.command.name,
+                icon_name=item.icon,
+                default_min=lo,
+                default_max=hi,
                 available_when_off_only=off_only,
                 unit=unit,
             )
@@ -94,7 +96,7 @@ class TaiSeiaTimerNumber(TaiSeiaBaseEntity, NumberEntity):
     @property
     def available(self) -> bool:
         if not self.has_status(STATUS_POWER):
-            return False
+            return self.has_status(self._status_key)
         if self._available_when_off_only:
             return not self.status_bool(STATUS_POWER)
         return True

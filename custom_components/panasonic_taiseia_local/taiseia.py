@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import xml.etree.ElementTree as ET
@@ -10,7 +11,11 @@ from dataclasses import dataclass, field
 import aiohttp
 
 from .const import (
+    DEFAULT_MAX_CONCURRENT,
     DEFAULT_PORT,
+    DEFAULT_REQUEST_RETRIES,
+    DEFAULT_REQUEST_RETRY_DELAY,
+    DEFAULT_REQUEST_TIMEOUT,
     ENTITY_SERVICES_BY_TYPE,
     REG_ALL_STATES,
     REG_MODEL,
@@ -28,6 +33,39 @@ _LOGGER = logging.getLogger(__package__)
 SOAP_NS = "urn:schemas-upnp-org:service:SwitchPower:1"
 CONTROL_PATH = "/SmartHome/Control"
 DEVICE_XML_PATH = "/device.xml"
+
+# Shared across all clients in this HA process (limits LAN thundering herd).
+_LAN_SEM: asyncio.Semaphore | None = None
+_LAN_SEM_LIMIT: int = DEFAULT_MAX_CONCURRENT
+
+
+def configure_lan_concurrency(max_concurrent: int) -> None:
+    """Recreate the shared semaphore when the configured limit changes."""
+    global _LAN_SEM, _LAN_SEM_LIMIT
+    limit = max(1, min(8, int(max_concurrent)))
+    if _LAN_SEM is None or _LAN_SEM_LIMIT != limit:
+        _LAN_SEM = asyncio.Semaphore(limit)
+        _LAN_SEM_LIMIT = limit
+
+
+def _lan_semaphore() -> asyncio.Semaphore:
+    global _LAN_SEM
+    if _LAN_SEM is None:
+        configure_lan_concurrency(DEFAULT_MAX_CONCURRENT)
+    assert _LAN_SEM is not None
+    return _LAN_SEM
+
+
+def _is_transient(err: BaseException) -> bool:
+    return isinstance(
+        err,
+        (
+            TimeoutError,
+            asyncio.TimeoutError,
+            aiohttp.ClientError,
+            ConnectionError,
+        ),
+    )
 
 
 class TaiSeiaError(Exception):
@@ -119,6 +157,8 @@ def parse_device_xml(xml_text: str) -> dict:
             "modelNumber",
             "modelDescription",
             "UDN",
+            "presentationURL",
+            "manufacturerURL",
         ):
             info[tag] = (elem.text or "").strip()
     udn = info.get("UDN", "")
@@ -135,6 +175,11 @@ def parse_device_xml(xml_text: str) -> dict:
     if m:
         sw = m.group(1)
     info["sw_version"] = sw
+    # presentationURL is typically http://<lan-ip>:57223
+    pres = info.get("presentationURL", "")
+    m = re.search(r"https?://([^/:]+)", pres)
+    if m:
+        info["presentation_host"] = m.group(1)
     return info
 
 
@@ -192,13 +237,37 @@ class TaiSeiaClient:
         session: aiohttp.ClientSession,
         host: str,
         port: int = DEFAULT_PORT,
-        timeout: float = 8.0,
+        timeout: float = DEFAULT_REQUEST_TIMEOUT,
+        retries: int = DEFAULT_REQUEST_RETRIES,
+        retry_delay: float = DEFAULT_REQUEST_RETRY_DELAY,
     ) -> None:
         self._session = session
         self.host = host
         self.port = port
-        self._timeout = aiohttp.ClientTimeout(total=timeout)
+        self.retries = max(1, int(retries))
+        self.retry_delay = float(retry_delay)
+        self._timeout = aiohttp.ClientTimeout(total=float(timeout))
         self.device: DeviceInfo = DeviceInfo(host=host, port=port)
+        # Extra services to poll (from APK CommandList profile).
+        self.poll_services: list[int] = []
+
+    def apply_lan_settings(
+        self,
+        *,
+        timeout: float | None = None,
+        retries: int | None = None,
+        retry_delay: float | None = None,
+        max_concurrent: int | None = None,
+    ) -> None:
+        """Update per-client timeout/retry and optional global concurrency."""
+        if timeout is not None:
+            self._timeout = aiohttp.ClientTimeout(total=float(timeout))
+        if retries is not None:
+            self.retries = max(1, int(retries))
+        if retry_delay is not None:
+            self.retry_delay = float(retry_delay)
+        if max_concurrent is not None:
+            configure_lan_concurrency(max_concurrent)
 
     @property
     def base_url(self) -> str:
@@ -236,20 +305,46 @@ class TaiSeiaClient:
             "SOAPACTION": f'"{SOAP_NS}#SetSaanet"',
         }
         url = f"{self.base_url}{CONTROL_PATH}"
-        async with self._session.post(
-            url, data=body.encode(), headers=headers, timeout=self._timeout
-        ) as resp:
-            text = await resp.text()
-        m = re.search(r"<RetSaanetValue>([^<]*)</RetSaanetValue>", text)
-        if not m:
-            raise TaiSeiaCommandError(f"no RetSaanetValue in response: {text[:200]}")
-        ret = m.group(1)
-        if ret.upper() == "FFFFFFFFFFFF":
-            raise TaiSeiaCommandError(f"command rejected: {hexv}")
-        raw = bytes.fromhex(ret)
-        if not raw or raw[0] != len(raw) or xor_checksum(raw[:-1]) != raw[-1]:
-            raise TaiSeiaCommandError(f"invalid TaiSEIA response: {ret}")
-        return raw
+        last_err: BaseException | None = None
+        retries = max(1, int(self.retries))
+        for attempt in range(1, retries + 1):
+            try:
+                async with _lan_semaphore():
+                    async with self._session.post(
+                        url,
+                        data=body.encode(),
+                        headers=headers,
+                        timeout=self._timeout,
+                    ) as resp:
+                        text = await resp.text()
+                m = re.search(r"<RetSaanetValue>([^<]*)</RetSaanetValue>", text)
+                if not m:
+                    raise TaiSeiaCommandError(
+                        f"no RetSaanetValue in response: {text[:200]}"
+                    )
+                ret = m.group(1)
+                if ret.upper() == "FFFFFFFFFFFF":
+                    raise TaiSeiaCommandError(f"command rejected: {hexv}")
+                raw = bytes.fromhex(ret)
+                if not raw or raw[0] != len(raw) or xor_checksum(raw[:-1]) != raw[-1]:
+                    raise TaiSeiaCommandError(f"invalid TaiSEIA response: {ret}")
+                return raw
+            except TaiSeiaCommandError:
+                raise
+            except Exception as err:  # noqa: BLE001 — classify transient below
+                last_err = err
+                if not _is_transient(err) or attempt >= retries:
+                    raise
+                _LOGGER.debug(
+                    "TaiSEIA %s attempt %s/%s failed: %s; retrying",
+                    self.host,
+                    attempt,
+                    retries,
+                    err,
+                )
+                await asyncio.sleep(self.retry_delay * attempt)
+        assert last_err is not None
+        raise last_err
 
     async def async_read(self, type_id: int, service: int) -> bytes:
         return await self.async_set_saanet(make_pdu(type_id, service, write=False))
@@ -328,13 +423,16 @@ class TaiSeiaClient:
 
     async def async_fetch_status(self) -> dict[str, str]:
         """Fetch ALL_STATES and normalize to status dict."""
-        poll = ENTITY_SERVICES_BY_TYPE.get(
+        base = ENTITY_SERVICES_BY_TYPE.get(
             self.device.sa_type_id, ENTITY_SERVICES_BY_TYPE[TYPE_AC]
         )
+        poll = list(dict.fromkeys([*base, *self.poll_services]))
         try:
             resp = await self.async_read(TYPE_REGISTER, REG_ALL_STATES)
             states = parse_all_states(resp)
-        except TaiSeiaError as err:
+        except Exception as err:  # noqa: BLE001
+            if not isinstance(err, TaiSeiaError) and not _is_transient(err):
+                raise
             _LOGGER.warning("ALL_STATES failed on %s: %s; falling back", self.host, err)
             states = {}
             for svc in poll:
@@ -342,12 +440,12 @@ class TaiSeiaClient:
                     continue
                 try:
                     states[svc] = await self.async_read_device(svc)
-                except TaiSeiaError:
+                except Exception:  # noqa: BLE001
                     continue
         for svc in poll:
             if svc not in states and (not self.device.services or svc in self.device.services):
                 try:
                     states[svc] = await self.async_read_device(svc)
-                except TaiSeiaError:
+                except Exception:  # noqa: BLE001
                     pass
         return states_to_status(states)

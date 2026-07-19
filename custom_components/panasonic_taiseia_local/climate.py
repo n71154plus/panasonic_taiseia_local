@@ -11,7 +11,13 @@ from homeassistant.components.climate import (
 )
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 
-from .capability import filter_option_map
+from .capability import filter_option_map, supported_values
+from .catalog import (
+    climate_fan_map,
+    climate_hvac_mappings,
+    climate_swing_map,
+    climate_temp_limits,
+)
 from .const import (
     CLIMATE_AVAILABLE_FAN_MODE,
     CLIMATE_AVAILABLE_MODE,
@@ -21,7 +27,9 @@ from .const import (
     CLIMATE_TEMPERATURE_STEP,
     DATA_CLIENT,
     DATA_COORDINATOR,
+    DATA_PROFILE,
     DOMAIN,
+    ICON_CLIMATE,
     LABEL_CLIMATE,
     STATUS_FAN,
     STATUS_MODE,
@@ -51,10 +59,12 @@ def _key_from_dict(target: dict, mode_name: str):
 async def async_setup_entry(hass, entry, async_add_entities) -> bool:
     client = hass.data[DOMAIN][entry.entry_id][DATA_CLIENT]
     coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
-    if client.device.sa_type_id != TYPE_AC:
+    profile = hass.data[DOMAIN][entry.entry_id].get(DATA_PROFILE)
+    # DeviceType 1 (AC) from catalog, or TaiSEIA type AC
+    if client.device.sa_type_id != TYPE_AC and not (profile and profile.device_type == 1):
         return True
     async_add_entities(
-        [TaiSeiaClimate(coordinator, client, entry.entry_id)],
+        [TaiSeiaClimate(coordinator, client, entry.entry_id, profile)],
         True,
     )
     return True
@@ -62,6 +72,15 @@ async def async_setup_entry(hass, entry, async_add_entities) -> bool:
 
 class TaiSeiaClimate(TaiSeiaBaseEntity, ClimateEntity):
     _entity_key = "climate"
+    _attr_icon = ICON_CLIMATE
+
+    def __init__(self, coordinator, client, entry_id, profile) -> None:
+        self._profile = profile
+        super().__init__(coordinator, client, entry_id)
+
+    def _mode_table(self) -> list[dict]:
+        catalog = climate_hvac_mappings(self._profile)
+        return catalog or CLIMATE_AVAILABLE_MODE
 
     @property
     def available(self) -> bool:
@@ -70,6 +89,11 @@ class TaiSeiaClimate(TaiSeiaBaseEntity, ClimateEntity):
     @property
     def label(self) -> str:
         return f"{self.nickname} {LABEL_CLIMATE}".strip()
+
+    @property
+    def icon(self) -> str:
+        # Prefer AC icon over HA climate domain thermostat dial.
+        return ICON_CLIMATE
 
     @property
     def supported_features(self) -> ClimateEntityFeature:
@@ -89,21 +113,20 @@ class TaiSeiaClimate(TaiSeiaBaseEntity, ClimateEntity):
         return UnitOfTemperature.CELSIUS
 
     def _fan_map(self) -> dict[int, str]:
-        return filter_option_map(self.client, SVC_FAN, CLIMATE_AVAILABLE_FAN_MODE)
+        base = climate_fan_map(self._profile) or CLIMATE_AVAILABLE_FAN_MODE
+        return filter_option_map(self.client, SVC_FAN, base)
 
     def _swing_map(self) -> dict[int, str]:
-        return filter_option_map(self.client, SVC_SWING, CLIMATE_AVAILABLE_SWING_MODE)
+        base = climate_swing_map(self._profile) or CLIMATE_AVAILABLE_SWING_MODE
+        return filter_option_map(self.client, SVC_SWING, base)
 
     def _mode_codes(self) -> set[int]:
+        table = self._mode_table()
         info = self.client.device.services.get(SVC_MODE)
+        codes = [m["mappingCode"] for m in table if m["mappingCode"] >= 0]
         if not info:
-            return {m["mappingCode"] for m in CLIMATE_AVAILABLE_MODE if m["mappingCode"] >= 0}
-        from .capability import supported_values
-
-        vals = supported_values(
-            info, [m["mappingCode"] for m in CLIMATE_AVAILABLE_MODE if m["mappingCode"] >= 0]
-        )
-        return set(vals)
+            return set(codes)
+        return set(supported_values(info, codes))
 
     @property
     def hvac_mode(self) -> HVACMode:
@@ -112,7 +135,7 @@ class TaiSeiaClimate(TaiSeiaBaseEntity, ClimateEntity):
         if not self.has_status(STATUS_MODE):
             return HVACMode.OFF
         value = self.status_int(STATUS_MODE)
-        for mode in CLIMATE_AVAILABLE_MODE:
+        for mode in self._mode_table():
             if mode["mappingCode"] == value:
                 return mode["key"]
         return HVACMode.OFF
@@ -120,13 +143,14 @@ class TaiSeiaClimate(TaiSeiaBaseEntity, ClimateEntity):
     @property
     def hvac_modes(self) -> list[HVACMode]:
         allowed = self._mode_codes()
+        table = self._mode_table()
         modes = [
             m["key"]
-            for m in CLIMATE_AVAILABLE_MODE
+            for m in table
             if m["mappingCode"] >= 0 and m["mappingCode"] in allowed
         ]
         if not modes:
-            modes = [m["key"] for m in CLIMATE_AVAILABLE_MODE if m["mappingCode"] >= 0]
+            modes = [m["key"] for m in table if m["mappingCode"] >= 0]
         modes.append(HVACMode.OFF)
         return modes
 
@@ -137,7 +161,7 @@ class TaiSeiaClimate(TaiSeiaBaseEntity, ClimateEntity):
             await self.client.async_write_ac(SVC_POWER, 0)
             return
 
-        mapping = next(m for m in CLIMATE_AVAILABLE_MODE if m["key"] == hvac_mode)
+        mapping = next(m for m in self._mode_table() if m["key"] == hvac_mode)
         mode = mapping["mappingCode"]
         was_off = not self.status_bool(STATUS_POWER)
         self.set_local_status(STATUS_MODE, str(mode))
@@ -194,16 +218,22 @@ class TaiSeiaClimate(TaiSeiaBaseEntity, ClimateEntity):
 
     @property
     def min_temp(self) -> float:
+        clo, chi = climate_temp_limits(self._profile)
         lo, hi = self.client.service_range(SVC_TEMP_SET)
         if self.client.has_service(SVC_TEMP_SET) and 10 <= lo <= hi <= 40:
             return float(lo)
+        if clo is not None:
+            return float(clo)
         return float(CLIMATE_MINIMUM_TEMPERATURE)
 
     @property
     def max_temp(self) -> float:
+        clo, chi = climate_temp_limits(self._profile)
         lo, hi = self.client.service_range(SVC_TEMP_SET)
         if self.client.has_service(SVC_TEMP_SET) and 10 <= lo <= hi <= 40:
             return float(hi)
+        if chi is not None:
+            return float(chi)
         return float(CLIMATE_MAXIMUM_TEMPERATURE)
 
     @property

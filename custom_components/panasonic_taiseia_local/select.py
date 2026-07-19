@@ -1,4 +1,4 @@
-"""Select platform for Panasonic TaiSEIA local."""
+"""Select platform — APK CommandList multi-value enum / rangeA."""
 
 from __future__ import annotations
 
@@ -7,16 +7,13 @@ import logging
 from homeassistant.components.select import SelectEntity
 
 from .capability import filter_option_map, supported_values
+from .catalog import iter_kind, service_allowed
 from .const import (
     DATA_CLIENT,
     DATA_COORDINATOR,
+    DATA_PROFILE,
     DOMAIN,
-    SELECT_DEFINITIONS_AC,
-    SELECT_DEFINITIONS_DH,
-    SELECT_DEFINITIONS_RF,
     STATUS_POWER,
-    TYPE_AC,
-    TYPE_DEHUMIDIFIER,
     TYPE_REFRIGERATOR,
 )
 from .entity import TaiSeiaBaseEntity
@@ -27,30 +24,24 @@ _LOGGER = logging.getLogger(__package__)
 async def async_setup_entry(hass, entry, async_add_entities) -> bool:
     client = hass.data[DOMAIN][entry.entry_id][DATA_CLIENT]
     coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
-    sa_type = client.device.sa_type_id
-    if sa_type == TYPE_AC:
-        defs = SELECT_DEFINITIONS_AC
-    elif sa_type == TYPE_DEHUMIDIFIER:
-        defs = SELECT_DEFINITIONS_DH
-    elif sa_type == TYPE_REFRIGERATOR:
-        defs = SELECT_DEFINITIONS_RF
-    else:
+    profile = hass.data[DOMAIN][entry.entry_id].get(DATA_PROFILE)
+    if not profile:
         return True
 
     entities = []
-    for service, status_key, label, icon, option_map in defs:
-        if client.device.services and service not in client.device.services:
+    for item in iter_kind(profile, "select"):
+        if not service_allowed(client.device.services, item.command.service):
             continue
         entities.append(
             TaiSeiaSelect(
                 coordinator,
                 client,
                 entry.entry_id,
-                service=service,
-                status_key=status_key,
-                select_label=label,
-                icon_name=icon,
-                option_map=option_map,
+                service=item.command.service,
+                status_key=item.command.status_key,
+                select_label=item.command.name,
+                icon_name=item.icon,
+                option_map=item.option_map or None,
             )
         )
     async_add_entities(entities, True)
@@ -83,10 +74,8 @@ class TaiSeiaSelect(TaiSeiaBaseEntity, SelectEntity):
             return filter_option_map(self.client, self._service, self._option_map)
         info = self.client.device.services.get(self._service)
         values = supported_values(info, list(range(-25, 8)))
-        # Prefer compact range from device descriptor
         if info and info.min_value <= info.max_value and abs(info.max_value - info.min_value) < 80:
             lo, hi = info.min_value, info.max_value
-            # signed byte heuristic for freezer
             if lo > 127:
                 lo = lo - 256
             if hi > 127:
@@ -115,7 +104,6 @@ class TaiSeiaSelect(TaiSeiaBaseEntity, SelectEntity):
     @property
     def current_option(self) -> str | None:
         raw = self.status_int(self._status_key, 0)
-        # signed display for freezer-like values
         if raw > 200:
             raw = raw - 256
         opts = self._options_map()

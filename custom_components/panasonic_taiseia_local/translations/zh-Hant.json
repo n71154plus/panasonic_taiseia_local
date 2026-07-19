@@ -1,0 +1,98 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Panasonic TaiSEIA Local（本地）",
+        "description": "建議先登入官網帳號取得暱稱／室內機型號／ModelType，再多選匯入區網設備。主設定負責帳號與共用參數；各設備為獨立設定。",
+        "data": {
+          "setup_mode": "設定方式"
+        }
+      },
+      "account": {
+        "title": "登入 Panasonic EMS",
+        "description": "{hint}",
+        "data": {
+          "username": "帳號（Email）",
+          "password": "密碼"
+        }
+      },
+      "import_devices": {
+        "title": "選擇要匯入的區網設備",
+        "description": "已用官網清單對應區網 MAC。無法本地控制的設備（例如冰箱）列於下方，不會匯入。\n\n略過／非區網：\n{skipped}",
+        "data": {
+          "devices": "匯入設備"
+        }
+      },
+      "discover": {
+        "title": "選擇發現的設備",
+        "description": "已掃描區網埠 57223 與 SSDP。ModelType 決定可用功能（來自官方 App CommandList）；不確定可選自動。",
+        "data": {
+          "device": "設備",
+          "name": "顯示名稱（選填）",
+          "indoor_model": "室內機型號（選填）",
+          "model_type": "ModelType（CommandList）"
+        }
+      },
+      "manual": {
+        "title": "手動新增",
+        "description": "輸入 CZ-T006 模組的區網 IP。ModelType 對應 App 指令表。",
+        "data": {
+          "host": "主機 IP",
+          "name": "顯示名稱（選填）",
+          "indoor_model": "室內機型號（選填）",
+          "model_type": "ModelType（CommandList）",
+          "update_interval": "更新間隔（秒）"
+        }
+      },
+      "discover_confirm": {
+        "title": "確認新增設備",
+        "description": "即將新增：{name}",
+        "data": {
+          "name": "顯示名稱（選填）",
+          "indoor_model": "室內機型號（選填）",
+          "model_type": "ModelType（CommandList）"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "無法連線到裝置，請確認 IP 與埠 57223。",
+      "no_devices": "未發現可匯入的區網設備。請確認設備與 HA 在同一區網，或改手動輸入 IP。",
+      "no_selection": "請至少選擇一台設備，或稍後再從整合選單匯入。",
+      "auth": "帳號或密碼錯誤。",
+      "cloud_api": "官網 API 連線失敗，請稍後再試。"
+    },
+    "abort": {
+      "already_configured": "此裝置已設定。",
+      "cannot_connect": "無法連線到裝置。",
+      "devices_imported": "已開始匯入所選設備。"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Panasonic TaiSEIA 選項",
+        "description": "主設定：帳號、區網連線與耗電週期（全室共用）。設備設定：名稱、ModelType、輪詢與是否計入全室。若尚無主設定，共用項目會顯示於設備選項中。",
+        "data": {
+          "password": "更新密碼（留空則不變）",
+          "refresh_cloud": "重新登入並更新 token",
+          "name": "顯示名稱",
+          "indoor_model": "室內機型號（選填）",
+          "model_type": "ModelType（CommandList）",
+          "update_interval": "輪詢間隔（秒，本機）",
+          "request_timeout": "連線逾時（秒，全室）",
+          "request_retries": "逾時／失敗重試次數（全室）",
+          "request_retry_delay": "重試間隔基數（秒，會×次數）",
+          "max_concurrent": "同時連線上限（全室，建議 1–3）",
+          "energy_enabled": "啟用耗電積分感測器",
+          "energy_include_house": "計入全室耗電加總",
+          "energy_cycle": "耗電歸零週期（全室共用）",
+          "energy_cycle_days": "週期天數（僅「每 N 天」）",
+          "energy_reset_day": "每月幾號歸零（1–28，僅每月週期）",
+          "energy_reset_weekday": "每週星期幾歸零（僅每週週期）",
+          "energy_reset_period": "立即重置本期耗電",
+          "energy_reset_total": "立即重置累計耗電"
+        }
+      }
+    }
+  }
+}

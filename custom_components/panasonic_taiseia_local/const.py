@@ -2,11 +2,37 @@
 
 from homeassistant.components.climate import HVACMode
 
-DOMAIN = "panasonic_taiseia"
+DOMAIN = "panasonic_taiseia_local"
 MANUFACTURER = "Panasonic"
-DEFAULT_NAME = "Panasonic TaiSEIA"
+DEFAULT_NAME = "Panasonic TaiSEIA Local"
 DEFAULT_PORT = 57223
 DEFAULT_UPDATE_INTERVAL = 30
+
+# Config entry kinds
+ENTRY_TYPE_HUB = "hub"
+ENTRY_TYPE_DEVICE = "device"
+CONF_ENTRY_TYPE = "entry_type"
+CONF_HUB_ENTRY_ID = "hub_entry_id"
+CONF_USERNAME = "username"
+CONF_PASSWORD = "password"
+CONF_CP_TOKEN = "cp_token"
+CONF_REFRESH_TOKEN = "refresh_token"
+# CZ-T006 modules choke when many LAN clients hit SetSaanet at once (HA boot /
+# aligned coordinator ticks). Defaults; overridable via shared LAN settings.
+DEFAULT_REQUEST_TIMEOUT = 12.0
+DEFAULT_MAX_CONCURRENT = 2
+DEFAULT_REQUEST_RETRIES = 3
+DEFAULT_REQUEST_RETRY_DELAY = 0.6
+# Back-compat aliases
+REQUEST_TIMEOUT = DEFAULT_REQUEST_TIMEOUT
+MAX_CONCURRENT_REQUESTS = DEFAULT_MAX_CONCURRENT
+REQUEST_RETRIES = DEFAULT_REQUEST_RETRIES
+REQUEST_RETRY_DELAY = DEFAULT_REQUEST_RETRY_DELAY
+
+CONF_REQUEST_TIMEOUT = "request_timeout"
+CONF_REQUEST_RETRIES = "request_retries"
+CONF_REQUEST_RETRY_DELAY = "request_retry_delay"
+CONF_MAX_CONCURRENT = "max_concurrent"
 
 PLATFORMS = [
     "climate",
@@ -16,26 +42,114 @@ PLATFORMS = [
     "switch",
     "select",
     "number",
+    "button",
 ]
 
 DATA_CLIENT = "client"
 DATA_COORDINATOR = "coordinator"
+DATA_PROFILE = "profile"
+DATA_ENERGY = "energy"
+DATA_HOUSE_ENERGY = "_house_energy_setup"
 
 CONF_HOST = "host"
 CONF_NAME = "name"
 CONF_UPDATE_INTERVAL = "update_interval"
 CONF_DEVICE_TYPE = "device_type"
+CONF_INDOOR_MODEL = "indoor_model"
+CONF_MODEL_TYPE = "model_type"
 
-# TaiSEIA type IDs
+# Energy options (cycle/reset_* are shared domain-wide; others per entry)
+CONF_ENERGY_ENABLED = "energy_enabled"
+CONF_ENERGY_INCLUDE_HOUSE = "energy_include_house"
+CONF_ENERGY_CYCLE = "energy_cycle"
+CONF_ENERGY_CYCLE_DAYS = "energy_cycle_days"
+CONF_ENERGY_RESET_DAY = "energy_reset_day"
+CONF_ENERGY_RESET_WEEKDAY = "energy_reset_weekday"
+CONF_ENERGY_RESET_PERIOD = "energy_reset_period"
+CONF_ENERGY_RESET_TOTAL = "energy_reset_total"
+
+# Cloud metadata cached on device entries (from EMS)
+CONF_CLOUD_NICKNAME = "cloud_nickname"
+CONF_CLOUD_MODEL = "cloud_model"
+CONF_CLOUD_MODEL_ID = "cloud_model_id"
+CONF_CLOUD_MODEL_TYPE = "cloud_model_type"
+CONF_CLOUD_DEVICE_TYPE = "cloud_device_type"
+CONF_CLOUD_GWID = "cloud_gwid"
+
+ENERGY_CYCLE_MONTHLY = "monthly"
+ENERGY_CYCLE_DAILY = "daily"
+ENERGY_CYCLE_WEEKLY = "weekly"
+ENERGY_CYCLE_YEARLY = "yearly"
+ENERGY_CYCLE_DAYS = "days"
+ENERGY_CYCLE_NONE = "none"
+
+DEFAULT_ENERGY_CYCLE = ENERGY_CYCLE_MONTHLY
+DEFAULT_ENERGY_CYCLE_DAYS = 30
+DEFAULT_ENERGY_RESET_DAY = 1
+DEFAULT_ENERGY_RESET_WEEKDAY = 0  # Monday
+
+ENERGY_CYCLE_OPTIONS = {
+    ENERGY_CYCLE_MONTHLY: "每月（可指定幾號歸零）",
+    ENERGY_CYCLE_DAILY: "每日（當地 0:00）",
+    ENERGY_CYCLE_WEEKLY: "每週（可指定星期幾）",
+    ENERGY_CYCLE_YEARLY: "每年（1/1）",
+    ENERGY_CYCLE_DAYS: "每 N 天（可指定天數）",
+    ENERGY_CYCLE_NONE: "不自動歸零（僅手動）",
+}
+
+ENERGY_WEEKDAY_OPTIONS = {
+    0: "星期一",
+    1: "星期二",
+    2: "星期三",
+    3: "星期四",
+    4: "星期五",
+    5: "星期六",
+    6: "星期日",
+}
+
+# TaiSEIA type IDs (Spec Table_10)
 TYPE_REGISTER = 0x00
 TYPE_AC = 0x01
 TYPE_REFRIGERATOR = 0x02
+TYPE_WASHING_MACHINE = 0x03
 TYPE_DEHUMIDIFIER = 0x04
+TYPE_TELEVISION = 0x05
+TYPE_DRYING_MACHINE = 0x06
+TYPE_HEAT_PUMP_WATER_HEATER = 0x07
+TYPE_AIR_CLEANER = 0x08
+TYPE_ELECTRONIC_POT = 0x09
+TYPE_OPEN_DRINK_MACHINE = 0x0A
+TYPE_INDUCTION_COOKER = 0x0B
+TYPE_DISH_WASHER = 0x0C
+TYPE_MICROWAVE_OVEN = 0x0D
+TYPE_FULL_HEAT_EXCHANGER = 0x0E
+TYPE_FAN = 0x0F
+TYPE_GAS_WATER_HEATER = 0x10
+TYPE_LAMP = 0x11
+TYPE_SMART_METER_GATEWAY = 0xE0
+TYPE_GENERAL_DEVICE = 0xF0
 
 DEVICE_TYPE_NAMES = {
+    TYPE_REGISTER: "註冊",
     TYPE_AC: "冷氣",
     TYPE_REFRIGERATOR: "冰箱",
+    TYPE_WASHING_MACHINE: "洗衣機",
     TYPE_DEHUMIDIFIER: "除濕機",
+    TYPE_TELEVISION: "電視機",
+    TYPE_DRYING_MACHINE: "烘衣機",
+    TYPE_HEAT_PUMP_WATER_HEATER: "熱泵熱水器",
+    TYPE_AIR_CLEANER: "空氣清淨機",
+    TYPE_ELECTRONIC_POT: "電子鍋",
+    TYPE_OPEN_DRINK_MACHINE: "開飲機",
+    TYPE_INDUCTION_COOKER: "電磁爐",
+    TYPE_DISH_WASHER: "烘碗機",
+    TYPE_MICROWAVE_OVEN: "微波爐",
+    TYPE_FULL_HEAT_EXCHANGER: "全熱交換器",
+    TYPE_FAN: "電扇",
+    TYPE_GAS_WATER_HEATER: "燃氣熱水器",
+    TYPE_LAMP: "燈具",
+    TYPE_SMART_METER_GATEWAY: "智慧電表閘道器",
+    TYPE_GENERAL_DEVICE: "通用裝置",
 }
 
 REG_REGISTER = 0x00
@@ -188,6 +302,7 @@ LABEL_RF_WINTER = "冬月模式"
 LABEL_RF_SHOPPING = "購物模式"
 LABEL_RF_VACATION = "度假模式"
 
+ICON_CLIMATE = "mdi:air-conditioner"
 ICON_THERMOMETER = "mdi:thermometer"
 ICON_NANOE = "mdi:atom"
 ICON_ECONAVI = "mdi:leaf"

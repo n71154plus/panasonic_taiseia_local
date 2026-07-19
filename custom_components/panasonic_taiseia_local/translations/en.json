@@ -1,0 +1,98 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Panasonic TaiSEIA Local",
+        "description": "Sign in to the official EMS account to fetch nicknames / indoor models / ModelType, then multi-select LAN devices to import. The hub entry holds credentials and shared settings.",
+        "data": {
+          "setup_mode": "Setup mode"
+        }
+      },
+      "account": {
+        "title": "Sign in to Panasonic EMS",
+        "description": "{hint}",
+        "data": {
+          "username": "Account (email)",
+          "password": "Password"
+        }
+      },
+      "import_devices": {
+        "title": "Select LAN devices to import",
+        "description": "Matched cloud inventory to LAN MAC addresses. Non-local devices (e.g. fridge) are listed below and will not be imported.\n\nSkipped / not on LAN:\n{skipped}",
+        "data": {
+          "devices": "Import devices"
+        }
+      },
+      "discover": {
+        "title": "Select discovered device",
+        "description": "Scanned LAN port 57223 and SSDP. ModelType selects the CommandList feature set.",
+        "data": {
+          "device": "Device",
+          "name": "Display name (optional)",
+          "indoor_model": "Indoor model (optional)",
+          "model_type": "ModelType (CommandList)"
+        }
+      },
+      "manual": {
+        "title": "Manual setup",
+        "description": "Enter the CZ-T006 module LAN IP.",
+        "data": {
+          "host": "Host IP",
+          "name": "Display name (optional)",
+          "indoor_model": "Indoor model (optional)",
+          "model_type": "ModelType (CommandList)",
+          "update_interval": "Update interval (seconds)"
+        }
+      },
+      "discover_confirm": {
+        "title": "Confirm device",
+        "description": "About to add: {name}",
+        "data": {
+          "name": "Display name (optional)",
+          "indoor_model": "Indoor model (optional)",
+          "model_type": "ModelType (CommandList)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect. Check the IP and port 57223.",
+      "no_devices": "No importable LAN devices found.",
+      "no_selection": "Select at least one device, or import later from the integration menu.",
+      "auth": "Invalid username or password.",
+      "cloud_api": "Cloud API request failed. Try again later."
+    },
+    "abort": {
+      "already_configured": "This device is already configured.",
+      "cannot_connect": "Cannot connect to the device.",
+      "devices_imported": "Started importing selected devices."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Panasonic TaiSEIA options",
+        "description": "Hub: account, LAN tunables, energy cycle (shared). Device: name, ModelType, poll interval, house total. Without a hub, shared fields appear on the device options.",
+        "data": {
+          "password": "Update password (leave blank to keep)",
+          "refresh_cloud": "Re-login and refresh tokens",
+          "name": "Display name",
+          "indoor_model": "Indoor model (optional)",
+          "model_type": "ModelType (CommandList)",
+          "update_interval": "Poll interval (seconds, this device)",
+          "request_timeout": "Request timeout (seconds, shared)",
+          "request_retries": "Retries on timeout/failure (shared)",
+          "request_retry_delay": "Retry delay base seconds (× attempt)",
+          "max_concurrent": "Max concurrent LAN requests (shared, try 1–3)",
+          "energy_enabled": "Enable energy integration sensors",
+          "energy_include_house": "Include in house energy total",
+          "energy_cycle": "Energy reset cycle (shared)",
+          "energy_cycle_days": "Cycle length in days (days cycle only)",
+          "energy_reset_day": "Day of month to reset (1–28, monthly only)",
+          "energy_reset_weekday": "Weekday to reset (weekly only)",
+          "energy_reset_period": "Reset period energy now",
+          "energy_reset_total": "Reset total energy now"
+        }
+      }
+    }
+  }
+}

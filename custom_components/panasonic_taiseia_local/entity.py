@@ -8,6 +8,7 @@ from homeassistant.helpers.device_registry import CONNECTION_NETWORK_MAC
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, MANUFACTURER
+from .probe_info import type_summary
 from .taiseia import TaiSeiaClient
 
 
@@ -47,17 +48,45 @@ class TaiSeiaBaseEntity(CoordinatorEntity, ABC):
         if d.mac and len(d.mac) == 12:
             mac = ":".join(d.mac[i : i + 2] for i in range(0, 12, 2)).lower()
             connections.add((CONNECTION_NETWORK_MAC, mac))
-        indoor = (self.coordinator.data or {}).get("indoor_model")
+        data = self.coordinator.data or {}
+        indoor = data.get("indoor_model") or data.get("cloud_model")
+        model_type = data.get("model_type") or data.get("cloud_model_type")
         model_base = indoor or d.sa_model or d.model_number or d.model_name
+        host = d.host or self.client.host
+        port = d.port or self.client.port
+        status = data.get("status") or {}
+        model_bits = [model_base, type_summary(d)]
+        if model_type:
+            model_bits.append(model_type)
         info = {
             "identifiers": {(DOMAIN, d.unique_id)},
             "name": self.nickname,
             "manufacturer": d.manufacturer or MANUFACTURER,
-            "model": f"{model_base} ({d.type_name})".strip(),
+            "model": " · ".join(str(b) for b in model_bits if b),
             "connections": connections,
+            "configuration_url": f"http://{host}:{port}",
         }
-        if d.sw_version:
-            info["sw_version"] = d.sw_version
+        fw = d.sw_version or ""
+        cloud_nick = data.get("cloud_nickname")
+        sw_bits = [b for b in (fw, f"狀態×{len(status)}") if b]
+        if cloud_nick:
+            sw_bits.append(f"雲端:{cloud_nick}")
+        if sw_bits:
+            info["sw_version"] = " · ".join(sw_bits)
+        hw_parts = [
+            p
+            for p in (
+                d.model_name or None,
+                d.sa_model or d.model_number or None,
+                data.get("cloud_model_id"),
+            )
+            if p
+        ]
+        hw_parts.extend([host, f"服務×{len(d.services)}"])
+        info["hw_version"] = " · ".join(str(p) for p in hw_parts)
+        serial = data.get("cloud_gwid") or d.mac
+        if serial:
+            info["serial_number"] = str(serial).upper()
         return info
 
     @property
