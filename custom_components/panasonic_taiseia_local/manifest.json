@@ -1,0 +1,20 @@
+{
+  "domain": "panasonic_taiseia_local",
+  "name": "Panasonic TaiSEIA Local",
+  "codeowners": ["@n71154plus"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/n71154plus/panasonic_taiseia_local",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/n71154plus/panasonic_taiseia_local/issues",
+  "requirements": [],
+  "ssdp": [
+    {
+      "st": "urn:schemas-upnp-org:service:SwitchPower:1"
+    },
+    {
+      "deviceType": "urn:schemas-upnp-org:device:airconditonDevice:1"
+    }
+  ],
+  "version": "1.5.1"
+}
