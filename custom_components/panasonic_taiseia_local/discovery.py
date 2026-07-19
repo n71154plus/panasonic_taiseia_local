@@ -165,6 +165,13 @@ async def async_probe_host(
     )
 
 
+def _normalize_mac(mac: str | None) -> str | None:
+    if not mac:
+        return None
+    cleaned = mac.replace(":", "").replace("-", "").upper()
+    return cleaned if len(cleaned) == 12 else None
+
+
 async def async_discover_devices(
     session: aiohttp.ClientSession,
     *,
@@ -186,3 +193,22 @@ async def async_discover_devices(
         if dev:
             results.append(dev)
     return results
+
+
+async def async_find_host_by_mac(
+    session: aiohttp.ClientSession,
+    mac: str,
+    *,
+    include_subnet_scan: bool = True,
+) -> DiscoveredDevice | None:
+    """Re-locate a module after DHCP gave it a new IP (match by MAC)."""
+    want = _normalize_mac(mac)
+    if not want:
+        return None
+    found = await async_discover_devices(
+        session, include_subnet_scan=include_subnet_scan
+    )
+    for dev in found:
+        if _normalize_mac(dev.mac) == want:
+            return dev
+    return None

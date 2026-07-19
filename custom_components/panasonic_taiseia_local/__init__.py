@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import timedelta
 import logging
+import time
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_NAME
@@ -40,6 +41,7 @@ from .const import (
     STATUS_OPERATING_POWER,
     SVC_OPERATING_POWER,
 )
+from .discovery import async_find_host_by_mac
 from .energy import (
     async_get_energy_settings,
     async_load_tracker,
@@ -53,6 +55,8 @@ from .taiseia import TaiSeiaClient, configure_lan_concurrency
 _LOGGER = logging.getLogger(__package__)
 
 HUB_PLATFORMS = ["sensor"]
+# Avoid flooding the LAN with full /24 scans on every failed poll.
+_HOST_REDISCOVER_COOLDOWN_S = 300.0
 
 
 def _is_hub(entry: ConfigEntry) -> bool:
@@ -110,6 +114,47 @@ async def _async_setup_hub(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+def _entry_mac(entry: ConfigEntry) -> str | None:
+    mac = (entry.data.get("mac") or entry.unique_id or "").replace(":", "").replace(
+        "-", ""
+    )
+    return mac.upper() if len(mac) == 12 else None
+
+
+async def _async_rebinding_host(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    client: TaiSeiaClient,
+    *,
+    reason: str,
+) -> str | None:
+    """If DHCP moved the module, find it by MAC and persist the new IP."""
+    mac = _entry_mac(entry)
+    if not mac:
+        return None
+    session = async_get_clientsession(hass)
+    found = await async_find_host_by_mac(session, mac)
+    if not found or found.host == client.host:
+        return None
+    _LOGGER.info(
+        "TaiSEIA %s moved %s → %s (%s); updating config entry",
+        mac,
+        client.host,
+        found.host,
+        reason,
+    )
+    client.host = found.host
+    client.device.host = found.host
+    if found.mac:
+        client.device.mac = found.mac
+    new_data = dict(entry.data)
+    new_data[CONF_HOST] = found.host
+    if found.mac:
+        new_data["mac"] = found.mac.upper()
+    hass.config_entries.async_update_entry(entry, data=new_data)
+    return found.host
+
+
 async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     host = entry.data[CONF_HOST]
     session = async_get_clientsession(hass)
@@ -130,14 +175,33 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     try:
         await client.async_probe()
     except Exception as err:
-        raise ConfigEntryNotReady(
-            f"Cannot reach TaiSEIA device at {host}: {err}"
-        ) from err
+        rebound = await _async_rebinding_host(
+            hass, entry, client, reason="setup unreachable"
+        )
+        if rebound:
+            try:
+                await client.async_probe()
+            except Exception as err2:
+                raise ConfigEntryNotReady(
+                    f"Cannot reach TaiSEIA device at {rebound}: {err2}"
+                ) from err2
+            host = rebound
+        else:
+            raise ConfigEntryNotReady(
+                f"Cannot reach TaiSEIA device at {host}: {err}"
+            ) from err
 
     new_data = dict(entry.data)
     changed = False
     if new_data.get(CONF_ENTRY_TYPE) != ENTRY_TYPE_DEVICE:
         new_data[CONF_ENTRY_TYPE] = ENTRY_TYPE_DEVICE
+        changed = True
+    if client.device.mac and new_data.get("mac") != client.device.mac.upper():
+        new_data["mac"] = client.device.mac.upper()
+        changed = True
+    if new_data.get(CONF_HOST) != client.host:
+        new_data[CONF_HOST] = client.host
+        host = client.host
         changed = True
     if new_data.get("device_type") != client.device.sa_type_id:
         new_data["device_type"] = client.device.sa_type_id
@@ -201,10 +265,43 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         SVC_OPERATING_POWER in client.device.services
     )
     entry_id = entry.entry_id
+    last_rediscover_mono = 0.0
 
     async def async_update_data():
+        nonlocal last_rediscover_mono
+        live = hass.config_entries.async_get_entry(entry_id)
+        current_host = client.host
         try:
             status = await client.async_fetch_status()
+        except Exception as err:
+            now = time.monotonic()
+            if now - last_rediscover_mono >= _HOST_REDISCOVER_COOLDOWN_S:
+                last_rediscover_mono = now
+                live_entry = live or entry
+                rebound = await _async_rebinding_host(
+                    hass, live_entry, client, reason="poll unreachable"
+                )
+                if rebound:
+                    try:
+                        status = await client.async_fetch_status()
+                        current_host = rebound
+                    except Exception as err2:
+                        raise UpdateFailed(
+                            f"TaiSEIA update failed for {rebound}: "
+                            f"{type(err2).__name__}: {err2}"
+                        ) from err2
+                else:
+                    raise UpdateFailed(
+                        f"TaiSEIA update failed for {current_host}: "
+                        f"{type(err).__name__}: {err}"
+                    ) from err
+            else:
+                raise UpdateFailed(
+                    f"TaiSEIA update failed for {current_host}: "
+                    f"{type(err).__name__}: {err}"
+                ) from err
+
+        try:
             power_w = None
             settings = await async_get_energy_settings(hass)
             energy_tracker.apply_settings(settings)
@@ -217,7 +314,7 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         power_w = None
                 energy_tracker.update(power_w)
                 await async_save_tracker(hass, entry_id, energy_tracker)
-            # Re-read entry data so cloud sync updates show up without reload
+            # Re-read entry data so cloud sync / IP rebind show up without reload
             live = hass.config_entries.async_get_entry(entry_id)
             live_data = live.data if live else new_data
             return {
@@ -225,7 +322,7 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "device": client.device,
                 "name": live_data.get(CONF_NAME)
                 or client.device.sa_model
-                or host,
+                or current_host,
                 "indoor_model": live_data.get(CONF_INDOOR_MODEL),
                 "model_type": live_data.get(CONF_MODEL_TYPE) or model_type,
                 "cloud_nickname": live_data.get(CONF_CLOUD_NICKNAME),
@@ -251,9 +348,12 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "lan_retries": lan.retries,
                 "lan_max_concurrent": lan.max_concurrent,
             }
+        except UpdateFailed:
+            raise
         except Exception as err:
             raise UpdateFailed(
-                f"TaiSEIA update failed for {host}: {type(err).__name__}: {err}"
+                f"TaiSEIA update failed for {current_host}: "
+                f"{type(err).__name__}: {err}"
             ) from err
 
     coordinator = DataUpdateCoordinator(

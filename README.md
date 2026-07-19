@@ -44,17 +44,46 @@ If your units are only reachable through cloud apps and no TaiSEIA Wi‑Fi contr
 - Optional Panasonic Taiwan **EMS** sign-in to import nicknames / ModelType / indoor model (matched by MAC)
 - Optional energy sensors (period / total / house total) with configurable reset cycles (monthly, daily, weekly, yearly, or every N days)
 
-## Supported devices (confirmed)
+## Stable supported devices
 
-**Prerequisite:** TCP **57223** open on the LAN. No local port → no local control.
+This integration only talks to the **TaiSEIA LAN port TCP 57223** (UPnP `SetSaanet`, commonly on CZ-T006-class controllers). The tables below list App **CommandList** ModelTypes that map to dedicated platforms — closest to official-app behaviour.
 
-| Class | Type ID | Support |
+### Stable (recommended)
+
+| Class | Type | Platform | Built-in ModelTypes (CommandList) |
+| --- | --- | --- | --- |
+| **Air conditioner** | `0x01` | `climate` + sensors / switches / … | GX, J, J-DUCT, LJ, LJV, LX, PU, PX, **PXGD** (default), QX, RX-N, SX-DUCT, UJ, UX, VX |
+| **Dehumidifier** | `0x04` | `humidifier` + sensors / switches / … | CXW, EHW, GHW, JHV2, **JHW** (default), LXW, MHW, NHW, NNW, NNW-L, NXW |
+
+In practice: Taiwan units that expose `57223` on the LAN and show one of the ModelTypes above in EMS / the official app are treated as **stable**. You can override ModelType in device options; when unsure, try **PXGD** (AC) or **JHW** (dehumidifier) first.
+
+### Conditional (needs `57223`; fewer ModelTypes)
+
+| Class | Type | Notes |
 | --- | --- | --- |
-| Air conditioner | `0x01` | **Full** — CommandList ModelTypes: GX, J, J-DUCT, LJ, LJV, LX, PU, PX, **PXGD** (default), QX, RX-N, SX-DUCT, UJ, UX, VX |
-| Dehumidifier | `0x04` | **Full** — CXW, EHW, GHW, JHV2, **JHW** (default), LXW, MHW, NHW, NNW, NNW-L, NXW |
-| Air cleaner | `0x08` | CommandList **LHW** / **LHW-40** (if LAN port present) |
-| Refrigerator | `0x02` | CommandList **F657** only if LAN port present (many newer fridges are cloud-only) |
-| Other TaiSEIA types | washer, TV, fan, … | Recognized; **generic** entities only when `57223` is available (not App-level Chinese option maps) |
+| Air cleaner | `0x08` | CommandList: **LHW**, **LHW-40**. No LAN port → no local control. |
+| Refrigerator | `0x02` | CommandList: **F657** only. Most newer smart fridges are cloud-only — see below. |
+
+### Experimental / generic
+
+TaiSEIA also defines washers, dryers, TVs, fans, heat-pump water heaters, rice cookers, drink machines, induction cookers, dishwashers, microwaves, heat exchangers, gas water heaters, lamps, and more. If a unit **actually opens `57223`**, this integration builds **generic numeric entities** from the service list (`0x07`) — not App-quality Chinese option maps, and writes are not guaranteed. Treat these as experimental; do not expect AC/dehumidifier-level polish.
+
+## Devices that may not work
+
+Do **not** rely on this integration in the cases below; use the official app or a cloud HA integration (Comfort Cloud, Smart App, MirAIe, …) instead.
+
+| Situation | Why it fails or works poorly |
+| --- | --- |
+| **No TCP 57223 on the LAN** | There is no local control path. EMS import only brings nicknames / model metadata — it does **not** replace LAN control. |
+| **Most newer smart refrigerators** (e.g. cloud-only NR series) | Common in practice: the fridge has an IP and works in the official app, but **does not** open `57223` → this integration cannot control it. Rare exceptions need F657 **and** an open local port. |
+| **Washers, dryers, TVs, fans, …** | No CommandList for these classes; even with a port you only get generic entities, far short of AC/dehumidifier support. |
+| **Comfort Cloud / MirAIe / non–Taiwan TaiSEIA only** | Different protocols — **out of scope** for this component. |
+| **Cloud-only / away-from-home control with no LAN reachability** | Designed for the **same LAN** as Home Assistant. |
+| **Firewall, guest Wi‑Fi, or VLAN isolation** | HA and the controller on different segments without `57223` allowed → discovery and polling fail. |
+| **Wrong ModelType / model mismatch** | You may connect but see wrong options or dead features. Override ModelType in device options, or report diagnostics. |
+| **Too many clients hammering one module** | CZ-T006-class modules can stall under concurrent SetSaanet load; lower concurrency / poll interval and avoid scanning the same IP from multiple tools at once. |
+
+**Quick check:** from the HA network, probe TCP **57223** on the device IP. If it connects, local control may work; if not, treat the unit as cloud-only.
 
 ## Requirements
 
@@ -89,6 +118,20 @@ The config flow supports:
 3. **Manual** — Enter the TaiSEIA Wi‑Fi controller IP directly
 
 A **hub** entry stores shared credentials and LAN / energy settings. Each **device** entry can override display name, ModelType, poll interval, and related options.
+
+## Dynamic / DHCP IPs
+
+Config entries store the last-known IP, but identity is **MAC-based** (`unique_id`). You usually do not need to delete and re-add the device when DHCP hands out a new address.
+
+**Recommended (most reliable):** create a **DHCP reservation** on your router so the TaiSEIA module’s MAC always gets the same IP.
+
+**Automatic recovery (v1.6.1+):**
+
+1. If setup or polling cannot reach the stored IP and the entry has a MAC, the integration runs SSDP + a LAN `:57223` scan, matches by MAC, and writes the new IP back into the config entry
+2. Re-discovery is rate-limited to about once every **5 minutes** so the LAN is not flooded
+3. Home Assistant SSDP rediscovery of the same MAC also updates the stored host
+
+**May still fail if:** no MAC was stored (manual IP-only add), HA and the module are not on the same /24, VLANs block discovery, or the new address does not open `57223`. In those cases, reserve a static lease on the router, or re-run LAN discovery (same MAC updates the existing entry).
 
 ## Debugging
 
