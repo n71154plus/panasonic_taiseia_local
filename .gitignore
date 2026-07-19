@@ -1,4 +1,3 @@
-# Byte-compiled / cache
 __pycache__/
 *.py[cod]
 *$py.class
@@ -6,11 +5,16 @@ __pycache__/
 .Python
 .venv/
 venv/
+env/
 .env
 .idea/
 .vscode/
 *.egg-info/
-.DS_Store
+.pytest_cache/
 .mypy_cache/
 .ruff_cache/
-.pytest_cache/
+.coverage
+htmlcov/
+*.log
+.DS_Store
+Thumbs.db
