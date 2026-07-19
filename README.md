@@ -23,7 +23,17 @@ Most existing Panasonic Home Assistant integrations talk to a **cloud service** 
 
 Day-to-day on/off, modes, setpoints, and sensors are polled and commanded **on your LAN**. The optional EMS account is only a convenience to **import the device inventory** — it is **not** used to send control commands or to read device status.
 
-If you already use Comfort Cloud / Smart App style integrations and your units are only reachable through those apps, this component will not replace that path unless the hardware exposes a local TaiSEIA Wi‑Fi controller on the network.
+### Coexistence (not either/or)
+
+This integration is an **additional local path**. It does **not** require you to remove the official Panasonic app or other Panasonic Home Assistant integrations (Comfort Cloud, Smart App, MirAIe, and similar).
+
+- Keep using the **official app** as usual
+- Keep any **existing cloud Panasonic HA integrations** if you want
+- This component talks to the TaiSEIA Wi‑Fi controller on your **LAN**; the app and cloud integrations keep their own cloud paths
+
+You can use them together by situation (for example local control at home, official app when away). Installing this is not a replacement for those tools.
+
+If your units are only reachable through cloud apps and no TaiSEIA Wi‑Fi controller appears on the LAN, this component cannot create a local control path for you — keep using the cloud integration in that case.
 
 ## Features
 
