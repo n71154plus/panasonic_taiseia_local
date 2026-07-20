@@ -18,14 +18,14 @@
       },
       "import_devices": {
         "title": "選擇要匯入的區網設備",
-        "description": "已用官網清單對應區網 MAC。無法本地控制的設備（例如冰箱）列於下方，不會匯入。\n\n略過／非區網：\n{skipped}",
+        "description": "已用官網清單對應區網 MAC；掃不到時會再問官網要模組 IP（UserGetGWIP）並探測埠 57223。UX／PX／RX 等冷氣只要模組有開本地埠即可匯入——找不到通常是網段或未開 57223，不是機型名稱問題。\n\n略過／無法本地控制：\n{skipped}",
         "data": {
           "devices": "匯入設備"
         }
       },
       "discover": {
         "title": "選擇發現的設備",
-        "description": "已掃描區網埠 57223 與 SSDP。ModelType 決定可用功能（來自官方 App CommandList）；不確定可選自動。",
+        "description": "已掃描區網埠 57223 與 SSDP。若清單為空：確認 HA 與 Wi‑Fi 模組同一區網、防火牆放行 57223，或改「手動輸入 IP」。ModelType（含 UX）決定功能對照，與能否被掃到無關。",
         "data": {
           "device": "設備",
           "name": "顯示名稱（選填）",
@@ -35,7 +35,7 @@
       },
       "manual": {
         "title": "手動新增",
-        "description": "輸入 CZ-T006 模組的區網 IP。ModelType 對應 App 指令表。",
+        "description": "輸入 TaiSEIA Wi‑Fi 模組（如 CZ-T006）的區網 IP。路由器或官方 App／EMS 可查 IP。ModelType 選 UX／PXGD 等僅影響指令對照。",
         "data": {
           "host": "主機 IP",
           "name": "顯示名稱（選填）",
@@ -56,7 +56,7 @@
     },
     "error": {
       "cannot_connect": "無法連線到裝置，請確認 IP 與埠 57223。",
-      "no_devices": "未發現可匯入的區網設備。請確認設備與 HA 在同一區網，或改手動輸入 IP。",
+      "no_devices": "未發現可本地控制的設備。請確認與 HA 同區網、模組開著 TCP 57223，或改手動輸入 IP；僅雲端可控的機種無法用本整合。",
       "no_selection": "請至少選擇一台設備，或稍後再從整合選單匯入。",
       "auth": "帳號或密碼錯誤。",
       "cloud_api": "官網 API 連線失敗，請稍後再試。"
@@ -91,6 +91,72 @@
           "energy_reset_weekday": "每週星期幾歸零（僅每週週期）",
           "energy_reset_period": "立即重置本期耗電",
           "energy_reset_total": "立即重置累計耗電"
+        }
+      }
+    }
+  },
+  "services": {
+    "probe_device": {
+      "name": "探測裝置",
+      "description": "對已設定的 TaiSEIA 模組重跑 probe，回傳服務清單（除錯／對照 App 用）。請優先用下方「裝置」選擇器。",
+      "fields": {
+        "device_id": {
+          "name": "裝置",
+          "description": "選擇 Home Assistant 裝置（建議）。用來指定要探測哪一台區網模組。"
+        },
+        "entry_id": {
+          "name": "設定條目（進階）",
+          "description": "無法用裝置選擇器時才填——選本整合的「裝置」設定條目。"
+        }
+      }
+    },
+    "read_service": {
+      "name": "讀取 TaiSEIA 服務",
+      "description": "從已設定裝置讀取單一 TaiSEIA 服務原始值，用來核對協定／CommandList 對應。",
+      "fields": {
+        "device_id": {
+          "name": "裝置",
+          "description": "選擇 Home Assistant 裝置（建議）。"
+        },
+        "entry_id": {
+          "name": "設定條目（進階）",
+          "description": "無法用裝置選擇器時才填——選本整合的「裝置」設定條目。"
+        },
+        "service": {
+          "name": "服務編號",
+          "description": "TaiSEIA 服務碼。可從清單選常用項，或自行輸入十六進位（如 0x15）。完整清單見探測／診斷下載。"
+        }
+      }
+    },
+    "write_service": {
+      "name": "寫入 TaiSEIA 服務",
+      "description": "進階／可能改變家電狀態。僅能寫入已設定裝置。有對應實體時請優先用 climate／開關／「濾網已清洗」按鈕。",
+      "fields": {
+        "device_id": {
+          "name": "裝置",
+          "description": "選擇 Home Assistant 裝置（建議）。"
+        },
+        "entry_id": {
+          "name": "設定條目（進階）",
+          "description": "無法用裝置選擇器時才填——選本整合的「裝置」設定條目。"
+        },
+        "service": {
+          "name": "服務編號",
+          "description": "要寫入的服務（例如 0x12 濾網重置）。請用下拉選，也可自訂十六進位。"
+        },
+        "value": {
+          "name": "數值",
+          "description": "寫入的整數（常見 0=關／重置、1=開）。請先對照 App 或診斷資料再寫。"
+        }
+      }
+    },
+    "scan_lan": {
+      "name": "掃描區網 TaiSEIA 模組",
+      "description": "以 SSDP 發現模組，可選再掃本機 /24 的 TCP 57223。不會寫入任何設備。",
+      "fields": {
+        "include_subnet_scan": {
+          "name": "包含 /24 埠掃描",
+          "description": "是否對 HA 所在子網每一台主機探測 57223（較慢但較完整）。只想快速 SSDP 可關閉。"
         }
       }
     }

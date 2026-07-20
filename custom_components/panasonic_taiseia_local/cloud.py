@@ -17,8 +17,13 @@ USER_AGENT = "okhttp/4.9.1"
 _LOGIN = "/userlogin1"
 _REFRESH = "/RefreshToken1"
 _DEVICES = "/UserGetRegisteredGwList2"
+_GW_IP = "/UserGetGWIP"
 
 _MAC_RE = re.compile(r"^[0-9A-Fa-f]{12}$")
+_IPV4_RE = re.compile(
+    r"^(?:(?:25[0-5]|2[0-4]\d|[01]?\d?\d)\.){3}"
+    r"(?:25[0-5]|2[0-4]\d|[01]?\d?\d)$"
+)
 
 
 class CloudAuthError(Exception):
@@ -50,6 +55,30 @@ def _mac_from_gwid(gwid: str) -> str | None:
     g = (gwid or "").strip()
     if _MAC_RE.match(g):
         return g.upper()
+    return None
+
+
+def parse_gw_ip_payload(raw: str | dict | None) -> str | None:
+    """Normalize UserGetGWIP body (quoted IP string or tiny JSON) → IPv4."""
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        for key in ("IP", "Ip", "ip", "GWIP", "GwIP", "Host", "host"):
+            value = raw.get(key)
+            if isinstance(value, str) and _IPV4_RE.match(value.strip()):
+                return value.strip()
+        return None
+    text = str(raw).strip().strip('"').strip("'")
+    if _IPV4_RE.match(text):
+        return text
+    # Rare: JSON object as string
+    if text.startswith("{"):
+        try:
+            import json as _json
+
+            return parse_gw_ip_payload(_json.loads(text))
+        except Exception:  # noqa: BLE001
+            return None
     return None
 
 
@@ -184,3 +213,48 @@ class CloudAccount:
                 )
             )
         return out
+
+    async def async_get_gw_ip(self, gwid: str) -> str | None:
+        """Ask EMS for the module's last-known LAN IP (UserGetGWIP)."""
+        gwid = (gwid or "").strip()
+        if not gwid:
+            return None
+        await self.ensure_login()
+        assert self.cp_token
+        url = f"{self.base_url}{_GW_IP}"
+        hdrs = {
+            "User-Agent": USER_AGENT,
+            "Content-Type": "application/json",
+            "CPToken": self.cp_token,
+            "cptoken": self.cp_token,
+        }
+        try:
+            async with self._session.post(
+                url,
+                headers=hdrs,
+                json={"GWID": gwid},
+                timeout=self._timeout,
+            ) as resp:
+                text = await resp.text()
+                if resp.status >= 400:
+                    _LOGGER.debug(
+                        "UserGetGWIP %s HTTP %s: %s",
+                        gwid,
+                        resp.status,
+                        text[:120],
+                    )
+                    return None
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("UserGetGWIP %s failed: %s", gwid, err)
+            return None
+        # Prefer raw body (APK treats response as quoted IP string)
+        ip = parse_gw_ip_payload(text)
+        if ip:
+            return ip
+        try:
+            import json as _json
+
+            data = _json.loads(text)
+        except Exception:  # noqa: BLE001
+            return None
+        return parse_gw_ip_payload(data)

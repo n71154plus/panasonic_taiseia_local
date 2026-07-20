@@ -35,55 +35,87 @@ You can use them together by situation (for example local control at home, offic
 
 If your units are only reachable through cloud apps and no TaiSEIA Wi‑Fi controller appears on the LAN, this component cannot create a local control path for you — keep using the cloud integration in that case.
 
+## Will it work for my device? (start here)
+
+This integration does **one** thing: talk TaiSEIA over LAN **TCP 57223** via UPnP **`SetSaanet`**.
+“Works in the official app” ≠ “works here.” Use the checklist and table below.
+
+### 30-second check
+
+| Step | Pass if |
+| --- | --- |
+| ① EMS / official app | Device is listed |
+| ② GWID | **12 hex digits** (MAC-like, e.g. `7061BE7FD9C2`) |
+| ③ LAN IP | `UserGetGWIP` / router shows a real IP (**not** `0.0.0.0`) |
+| ④ Port | **TCP 57223** connects to that IP |
+
+**All of ①–④** → likely supported (then match ModelType).
+**④ fails** → **no** local control with this integration (use cloud / official app).
+**② not MAC-shaped** (long / Base64 string) → almost always a cloud-only module (common on newer fridges).
+
+> Prefer **EMS account import** during setup: if LAN discovery misses a module, the flow asks EMS for the module IP and probes `57223`.
+
+### By appliance class
+
+| Class | DeviceType | Supported? | Notes |
+| --- | --- | --- | --- |
+| **Air conditioner** | `1` | **Yes** (primary) | CZ-T006-class modules usually keep `57223` open; see ModelTypes below |
+| **Dehumidifier** | `4` | **Yes** (primary) | Same as AC |
+| **Air cleaner** | `8` | **Conditional** | **LHW / LHW-40** only, and only if `57223` is open |
+| **Refrigerator** | `2` | **Usually no** | Pairing uses SoftAP `192.168.102.1` or BLE — **not** 57223; day-to-day control is cloud. F657 exists on paper; newer NR units often have no local port |
+| Washer / dryer | `3` / `6` | **No** | No TaiSEIA command table; pairing is BLE / JP SoftAP |
+| TV, fan, other small appliances | other | **No / experimental** | Even with an open port you only get generic entities |
+
+### AC / dehumidifier ModelTypes
+
+Built-in App **CommandList** with dedicated platforms:
+
+| Class | Platform | ModelTypes (bold = default when unsure) |
+| --- | --- | --- |
+| AC | `climate` + sensors / switches / … | GX, J, J-DUCT, LJ, LJV, LX, PU, PX, **PXGD**, QX, RX-N, SX-DUCT, UJ, UX, VX |
+| Dehumidifier | `humidifier` + … | CXW, EHW, GHW, JHV2, **JHW**, LXW, MHW, NHW, NNW, NNW-L, NXW |
+
+Override ModelType in device options. Name in the table but device not found → almost always network / VLAN / closed port — **not** an unsupported series name (same for UX / PX).
+
+### Pairing path ≠ day-to-day local control (from the official APK)
+
+| Pairing (app) | Day-to-day (app) | This integration |
+| --- | --- | --- |
+| AC / dehumidifier: SoftAP `pana-aircondition-*` / `panasonicsmart-*` → `192.168.1.1:57223`, or BLE pairing | **Cloud** `DeviceSetCommand` | If LAN `57223` stays open → **SetSaanet works** |
+| Fridge: SoftAP `Panasonic-NR-*` → `192.168.102.1`, or BLE+QR | **Cloud only** | **No** 57223 path |
+
+The official app does **not** use SetSaanet for normal remote control. This component is a **parallel local protocol** on the same hardware port.
+
 ## Features
 
 - Local polling for **climate** (AC) and **humidifier** (dehumidifier) platforms
 - Sensors, binary sensors, switches, selects, numbers, and buttons from the App **CommandList** / TaiSEIA capability set
 - For types without a CommandList: generic entities from the device service list (`0x07`)
 - Discovery via **SSDP** and LAN scan on port **57223**
-- Optional Panasonic Taiwan **EMS** sign-in to import nicknames / ModelType / indoor model (matched by MAC)
+- Optional Panasonic Taiwan **EMS** sign-in to import nicknames / ModelType / indoor model (MAC match; EMS IP fallback when scan misses)
 - Optional energy sensors (period / total / house total) with configurable reset cycles (monthly, daily, weekly, yearly, or every N days)
 
-## Stable supported devices
-
-This integration only talks to the **TaiSEIA LAN port TCP 57223** (UPnP `SetSaanet`, commonly on CZ-T006-class controllers). The tables below list App **CommandList** ModelTypes that map to dedicated platforms — closest to official-app behaviour.
-
-### Stable (recommended)
-
-| Class | Type | Platform | Built-in ModelTypes (CommandList) |
-| --- | --- | --- | --- |
-| **Air conditioner** | `0x01` | `climate` + sensors / switches / … | GX, J, J-DUCT, LJ, LJV, LX, PU, PX, **PXGD** (default), QX, RX-N, SX-DUCT, UJ, UX, VX |
-| **Dehumidifier** | `0x04` | `humidifier` + sensors / switches / … | CXW, EHW, GHW, JHV2, **JHW** (default), LXW, MHW, NHW, NNW, NNW-L, NXW |
-
-In practice: Taiwan units that expose `57223` on the LAN and show one of the ModelTypes above in EMS / the official app are treated as **stable**. You can override ModelType in device options; when unsure, try **PXGD** (AC) or **JHW** (dehumidifier) first.
-
-### Conditional (needs `57223`; fewer ModelTypes)
+## Advanced / experimental classes
 
 | Class | Type | Notes |
 | --- | --- | --- |
-| Air cleaner | `0x08` | CommandList: **LHW**, **LHW-40**. No LAN port → no local control. |
-| Refrigerator | `0x02` | CommandList: **F657** only. Most newer smart fridges are cloud-only — see below. |
+| Air cleaner | `0x08` | CommandList: **LHW**, **LHW-40**. Requires open `57223`. |
+| Refrigerator | `0x02` | CommandList lists **F657**; most newer smart fridges have **no** local port — see “Usually no” above. |
+| Other TaiSEIA classes | — | If `57223` is **actually** open, generic numeric entities are created; experimental only. |
 
-### Experimental / generic
+## Common failure modes
 
-TaiSEIA also defines washers, dryers, TVs, fans, heat-pump water heaters, rice cookers, drink machines, induction cookers, dishwashers, microwaves, heat exchangers, gas water heaters, lamps, and more. If a unit **actually opens `57223`**, this integration builds **generic numeric entities** from the service list (`0x07`) — not App-quality Chinese option maps, and writes are not guaranteed. Treat these as experimental; do not expect AC/dehumidifier-level polish.
-
-## Devices that may not work
-
-Do **not** rely on this integration in the cases below; use the official app or a cloud HA integration (Comfort Cloud, Smart App, MirAIe, …) instead.
-
-| Situation | Why it fails or works poorly |
+| Situation | Why |
 | --- | --- |
-| **No TCP 57223 on the LAN** | There is no local control path. EMS import only brings nicknames / model metadata — it does **not** replace LAN control. |
-| **Most newer smart refrigerators** (e.g. cloud-only NR series) | Common in practice: the fridge has an IP and works in the official app, but **does not** open `57223` → this integration cannot control it. Rare exceptions need F657 **and** an open local port. |
-| **Washers, dryers, TVs, fans, …** | No CommandList for these classes; even with a port you only get generic entities, far short of AC/dehumidifier support. |
-| **Comfort Cloud / MirAIe / non–Taiwan TaiSEIA only** | Different protocols — **out of scope** for this component. |
-| **Cloud-only / away-from-home control with no LAN reachability** | Designed for the **same LAN** as Home Assistant. |
-| **Firewall, guest Wi‑Fi, or VLAN isolation** | HA and the controller on different segments without `57223` allowed → discovery and polling fail. |
-| **Wrong ModelType / model mismatch** | You may connect but see wrong options or dead features. Override ModelType in device options, or report diagnostics. |
-| **Too many clients hammering one module** | CZ-T006-class modules can stall under concurrent SetSaanet load; lower concurrency / poll interval and avoid scanning the same IP from multiple tools at once. |
+| **No TCP 57223 on the LAN** | No local control path. EMS import does not replace LAN control. |
+| **Newer smart refrigerators (NR, …)** | SoftAP/BLE pairing then cloud; GWID often non-MAC; GWIP often `0.0.0.0`. |
+| **Washers, dryers, TVs, …** | No CommandList / no long-lived 57223. |
+| **Comfort Cloud / MirAIe / non–Taiwan only** | Different protocols — out of scope. |
+| **Firewall, guest Wi‑Fi, VLAN** | HA and module on different segments without `57223`. |
+| **Wrong ModelType** | Connects but options wrong — override in device options or report diagnostics. |
+| **Too many clients on one module** | CZ-T006 can stall; lower concurrency / poll interval. |
 
-**Quick check:** from the HA network, probe TCP **57223** on the device IP. If it connects, local control may work; if not, treat the unit as cloud-only.
+**Quick check:** probe TCP **57223** on the module IP. Connects → this integration may work; does not → treat as cloud-only.
 
 ## Requirements
 
@@ -133,7 +165,35 @@ Config entries store the last-known IP, but identity is **MAC-based** (`unique_i
 
 **May still fail if:** no MAC was stored (manual IP-only add), HA and the module are not on the same /24, VLANs block discovery, or the new address does not open `57223`. In those cases, reserve a static lease on the router, or re-run LAN discovery (same MAC updates the existing entry).
 
-## Debugging
+## Diagnostics and testing
+
+### Download diagnostics (for bug reports)
+
+1. **Settings → Devices & services → Panasonic TaiSEIA Local**
+2. Open the hub or device entry → related device → **Download diagnostics**
+3. Attach the JSON to a GitHub issue (passwords / tokens are redacted)
+
+Each device also has a diagnostic **Probe info** sensor (attributes include the service list and live status).
+
+### Developer services (Developer tools → Services)
+
+| Service | Purpose |
+| --- | --- |
+| `panasonic_taiseia_local.probe_device` | Re-run probe; return service list |
+| `panasonic_taiseia_local.read_service` | Read one service (`service`: `0x00` or int) |
+| `panasonic_taiseia_local.write_service` | **Advanced:** write one service (may change device state) |
+| `panasonic_taiseia_local.scan_lan` | SSDP + optional /24 `:57223` scan |
+
+Example (Developer tools → Actions; enable response):
+
+1. Choose `panasonic_taiseia_local.read_service`
+2. **Device**: pick the AC/dehumidifier with the selector (do not paste raw IDs)
+3. **Service id**: choose `0x00` from the dropdown, or type e.g. `0x15`
+4. Check `value` / `decoded` in the response
+
+Use `write_service` only for advanced testing, and only against **configured** entries. Prefer diagnostics download / `probe_device` / `read_service` when filing issues.
+
+### Debug logging
 
 Add to `configuration.yaml`:
 

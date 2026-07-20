@@ -35,13 +35,9 @@ from .const import (
     STATUS_POWER,
     SVC_OPERATING_POWER,
 )
+from .diagnostics_data import build_device_snapshot, probe_sensor_attributes
 from .entity import TaiSeiaBaseEntity
-from .probe_info import (
-    services_as_list,
-    status_as_list,
-    status_highlights,
-    type_summary,
-)
+from .probe_info import type_summary
 
 
 def _signed(raw: int) -> int:
@@ -397,58 +393,27 @@ class TaiSeiaProbeInfoSensor(TaiSeiaBaseEntity, SensorEntity):
             .get(self.entry_id, {})
             .get(DATA_PROFILE)
         )
-        name_overrides = (
-            {cmd.service: cmd.name for cmd in profile.commands}
-            if profile is not None
-            else None
+        if entry is None:
+            return {"error": "entry_missing"}
+        snapshot = build_device_snapshot(
+            entry=entry,
+            device=d,
+            status=status,
+            profile=profile,
+            coordinator_ok=self.coordinator.last_update_success,
+            poll_interval=data.get("poll_interval"),
+            lan={
+                "timeout": data.get("lan_timeout"),
+                "retries": data.get("lan_retries"),
+                "max_concurrent": data.get("lan_max_concurrent"),
+            },
+            extra=data,
         )
-        attrs: dict = {
-            "設備類型": type_summary(d),
-            "ModelType": data.get("model_type"),
-            "類型代碼": f"0x{d.sa_type_id:02X}",
-            "服務數量": len(d.services),
-            "服務清單": services_as_list(
-                d.services,
-                sa_type=d.sa_type_id,
-                name_overrides=name_overrides,
-            ),
-            "即時狀態數量": len(status),
-            "狀態摘要": status_highlights(status, d.sa_type_id),
-            "即時狀態": status_as_list(
-                status,
-                sa_type=d.sa_type_id,
-                name_overrides=name_overrides,
-            ),
-            "即時狀態原始": dict(status),
-            "IP": d.host or self.client.host,
-            "埠": d.port or self.client.port,
-            "MAC": d.mac or None,
-            "SA模組": d.sa_model or d.model_number or None,
-            "室內機型號": data.get("indoor_model"),
-            "輪詢間隔秒": data.get("poll_interval"),
-            "LAN逾時": data.get("lan_timeout"),
-            "LAN重試": data.get("lan_retries"),
-            "LAN併發上限": data.get("lan_max_concurrent"),
-            "協調器成功": self.coordinator.last_update_success,
-        }
+        attrs = probe_sensor_attributes(snapshot)
         last = getattr(self.coordinator, "last_update_success_time", None)
         if last is not None:
             attrs["上次成功更新"] = last.isoformat()
-
-        if entry is not None:
-            attrs.update(cloud_attrs_from_entry(entry))
-            if entry.data.get("hub_entry_id"):
-                attrs["主設定 entry"] = entry.data.get("hub_entry_id")
-        for key, label in (
-            ("cloud_nickname", "官網暱稱"),
-            ("cloud_model", "官網機型"),
-            ("cloud_model_id", "官網 ModelID"),
-            ("cloud_model_type", "官網 ModelType"),
-            ("cloud_gwid", "官網 GWID"),
-        ):
-            val = data.get(key)
-            if val not in (None, ""):
-                attrs[label] = val
+        attrs.update(cloud_attrs_from_entry(entry))
         return attrs
 
 

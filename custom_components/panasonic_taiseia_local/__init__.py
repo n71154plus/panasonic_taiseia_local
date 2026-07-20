@@ -79,6 +79,10 @@ def _setup_stagger_seconds(host: str) -> float:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
 
+    from .services import async_register_services
+
+    async_register_services(hass)
+
     if _is_hub(entry):
         return await _async_setup_hub(hass, entry)
 
