@@ -76,15 +76,10 @@ SCAN_SCHEMA = vol.Schema(
 
 
 def _resolve_entry_id(hass: HomeAssistant, call: ServiceCall) -> str:
+    """Resolve target device entry; prefer device picker over raw entry_id."""
     entry_id = call.data.get(ATTR_ENTRY_ID)
     device_id = call.data.get(CONF_DEVICE_ID)
-    if entry_id:
-        entry = hass.config_entries.async_get_entry(entry_id)
-        if entry is None or entry.domain != DOMAIN:
-            raise ServiceValidationError(f"Unknown entry_id: {entry_id}")
-        if entry.data.get(CONF_ENTRY_TYPE) != ENTRY_TYPE_DEVICE:
-            raise ServiceValidationError("entry_id must be a device entry")
-        return entry_id
+
     if device_id:
         registry = dr.async_get(hass)
         device = registry.async_get(device_id)
@@ -101,7 +96,16 @@ def _resolve_entry_id(hass: HomeAssistant, call: ServiceCall) -> str:
         raise ServiceValidationError(
             f"device_id {device_id} is not linked to a TaiSEIA device entry"
         )
-    raise ServiceValidationError("Provide entry_id or device_id")
+
+    if entry_id:
+        entry = hass.config_entries.async_get_entry(entry_id)
+        if entry is None or entry.domain != DOMAIN:
+            raise ServiceValidationError(f"Unknown entry_id: {entry_id}")
+        if entry.data.get(CONF_ENTRY_TYPE) != ENTRY_TYPE_DEVICE:
+            raise ServiceValidationError("entry_id must be a device entry")
+        return entry_id
+
+    raise ServiceValidationError("Select a Device (recommended) or a config entry")
 
 
 def _client_for_entry(hass: HomeAssistant, entry_id: str):

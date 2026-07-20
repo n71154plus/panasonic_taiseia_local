@@ -98,65 +98,65 @@
   "services": {
     "probe_device": {
       "name": "探測裝置",
-      "description": "對已設定裝置重跑 TaiSEIA probe，回傳服務清單（開發用）。",
+      "description": "對已設定的 TaiSEIA 模組重跑 probe，回傳服務清單（除錯／對照 App 用）。請優先用下方「裝置」選擇器。",
       "fields": {
-        "entry_id": {
-          "name": "設定條目 ID",
-          "description": "裝置 config entry ID（或改填 device_id）。"
-        },
         "device_id": {
-          "name": "裝置 ID",
-          "description": "Home Assistant 裝置登錄 ID。"
+          "name": "裝置",
+          "description": "選擇 Home Assistant 裝置（建議）。用來指定要探測哪一台區網模組。"
+        },
+        "entry_id": {
+          "name": "設定條目（進階）",
+          "description": "無法用裝置選擇器時才填——選本整合的「裝置」設定條目。"
         }
       }
     },
     "read_service": {
       "name": "讀取 TaiSEIA 服務",
-      "description": "從已設定裝置讀取單一 TaiSEIA 服務值。",
+      "description": "從已設定裝置讀取單一 TaiSEIA 服務原始值，用來核對協定／CommandList 對應。",
       "fields": {
-        "entry_id": {
-          "name": "設定條目 ID",
-          "description": "裝置 config entry ID（或改填 device_id）。"
-        },
         "device_id": {
-          "name": "裝置 ID",
-          "description": "Home Assistant 裝置登錄 ID。"
+          "name": "裝置",
+          "description": "選擇 Home Assistant 裝置（建議）。"
+        },
+        "entry_id": {
+          "name": "設定條目（進階）",
+          "description": "無法用裝置選擇器時才填——選本整合的「裝置」設定條目。"
         },
         "service": {
-          "name": "服務",
-          "description": "服務編號（整數或十六進位，例如 0x00）。"
+          "name": "服務編號",
+          "description": "TaiSEIA 服務碼。可從清單選常用項，或自行輸入十六進位（如 0x15）。完整清單見探測／診斷下載。"
         }
       }
     },
     "write_service": {
       "name": "寫入 TaiSEIA 服務",
-      "description": "進階：寫入原始 TaiSEIA 服務值，可能改變設備狀態。僅限已設定的條目。",
+      "description": "進階／可能改變家電狀態。僅能寫入已設定裝置。有對應實體時請優先用 climate／開關／「濾網已清洗」按鈕。",
       "fields": {
-        "entry_id": {
-          "name": "設定條目 ID",
-          "description": "裝置 config entry ID（或改填 device_id）。"
-        },
         "device_id": {
-          "name": "裝置 ID",
-          "description": "Home Assistant 裝置登錄 ID。"
+          "name": "裝置",
+          "description": "選擇 Home Assistant 裝置（建議）。"
+        },
+        "entry_id": {
+          "name": "設定條目（進階）",
+          "description": "無法用裝置選擇器時才填——選本整合的「裝置」設定條目。"
         },
         "service": {
-          "name": "服務",
-          "description": "服務編號（整數或十六進位，例如 0x12）。"
+          "name": "服務編號",
+          "description": "要寫入的服務（例如 0x12 濾網重置）。請用下拉選，也可自訂十六進位。"
         },
         "value": {
           "name": "數值",
-          "description": "要寫入的整數值。"
+          "description": "寫入的整數（常見 0=關／重置、1=開）。請先對照 App 或診斷資料再寫。"
         }
       }
     },
     "scan_lan": {
       "name": "掃描區網 TaiSEIA 模組",
-      "description": "SSDP，可選再掃本機 /24 的 TCP 57223，回傳發現清單。",
+      "description": "以 SSDP 發現模組，可選再掃本機 /24 的 TCP 57223。不會寫入任何設備。",
       "fields": {
         "include_subnet_scan": {
-          "name": "包含子網埠掃描",
-          "description": "是否額外掃描區網 /24 開啟 57223 的主機（較慢）。"
+          "name": "包含 /24 埠掃描",
+          "description": "是否對 HA 所在子網每一台主機探測 57223（較慢但較完整）。只想快速 SSDP 可關閉。"
         }
       }
     }

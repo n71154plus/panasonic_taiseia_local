@@ -152,20 +152,12 @@ TaiSEIA 規格尚有洗衣機、烘衣機、電視、電扇、熱泵熱水器、
 | `panasonic_taiseia_local.write_service` | **進階**：寫入單一服務（可能改變設備狀態） |
 | `panasonic_taiseia_local.scan_lan` | SSDP + 可選 /24 `:57223` 掃描 |
 
-範例（YAML，請勾選「回傳回應」）：
+範例（開發者工具 → 服務；請勾選「回傳回應」）：
 
-```yaml
-service: panasonic_taiseia_local.read_service
-data:
-  entry_id: YOUR_DEVICE_ENTRY_ID
-  service: "0x00"
-```
-
-```yaml
-service: panasonic_taiseia_local.scan_lan
-data:
-  include_subnet_scan: true
-```
+1. 選服務 `panasonic_taiseia_local.read_service`
+2. **裝置**：用選擇器挑冷氣／除濕（不要手填 ID）
+3. **服務編號**：下拉選 `0x00`，或自行輸入如 `0x15`
+4. 執行後在回應中看 `value`／`decoded`
 
 `write_service` 僅供進階測試，且只能操作**已設定**的裝置條目；回報問題時請優先用診斷下載／`probe_device`／`read_service`。
 

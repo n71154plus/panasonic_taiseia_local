@@ -98,65 +98,65 @@
   "services": {
     "probe_device": {
       "name": "Probe device",
-      "description": "Re-run TaiSEIA probe on a configured device and return the service list (developer tool).",
+      "description": "Re-probe a configured TaiSEIA module and return its service list (for debugging / App comparison). Prefer the Device picker below.",
       "fields": {
-        "entry_id": {
-          "name": "Config entry ID",
-          "description": "Device config entry ID (or use device_id)."
-        },
         "device_id": {
-          "name": "Device ID",
-          "description": "Home Assistant device registry ID."
+          "name": "Device",
+          "description": "Pick the Home Assistant device (recommended). Identifies which LAN module to probe."
+        },
+        "entry_id": {
+          "name": "Config entry (advanced)",
+          "description": "Only if you cannot use Device — select this integration's device config entry."
         }
       }
     },
     "read_service": {
       "name": "Read TaiSEIA service",
-      "description": "Read a single TaiSEIA service value from a configured device.",
+      "description": "Read one raw TaiSEIA service value from a configured device. Use to verify Protocol / App CommandList mapping.",
       "fields": {
-        "entry_id": {
-          "name": "Config entry ID",
-          "description": "Device config entry ID (or use device_id)."
-        },
         "device_id": {
-          "name": "Device ID",
-          "description": "Home Assistant device registry ID."
+          "name": "Device",
+          "description": "Pick the Home Assistant device (recommended)."
+        },
+        "entry_id": {
+          "name": "Config entry (advanced)",
+          "description": "Only if you cannot use Device — select this integration's device config entry."
         },
         "service": {
-          "name": "Service",
-          "description": "Service id as int or hex (e.g. 0x00 or 18)."
+          "name": "Service id",
+          "description": "TaiSEIA service number. Pick a common id or type a custom hex (e.g. 0x15). See probe / diagnostics for the full list."
         }
       }
     },
     "write_service": {
       "name": "Write TaiSEIA service",
-      "description": "ADVANCED: write a raw TaiSEIA service value. May change device state. Only for configured entries.",
+      "description": "ADVANCED / may change appliance state. Writes a raw TaiSEIA value to a configured device only. Prefer dedicated entities (climate, switches, filter-cleaned button) when available.",
       "fields": {
-        "entry_id": {
-          "name": "Config entry ID",
-          "description": "Device config entry ID (or use device_id)."
-        },
         "device_id": {
-          "name": "Device ID",
-          "description": "Home Assistant device registry ID."
+          "name": "Device",
+          "description": "Pick the Home Assistant device (recommended)."
+        },
+        "entry_id": {
+          "name": "Config entry (advanced)",
+          "description": "Only if you cannot use Device — select this integration's device config entry."
         },
         "service": {
-          "name": "Service",
-          "description": "Service id as int or hex (e.g. 0x12)."
+          "name": "Service id",
+          "description": "Service to write (e.g. 0x12 filter reset). Prefer dropdown; custom hex allowed."
         },
         "value": {
           "name": "Value",
-          "description": "Integer value to write."
+          "description": "Integer payload to write (often 0=off/reset, 1=on). Confirm against App / diagnostics first."
         }
       }
     },
     "scan_lan": {
       "name": "Scan LAN for TaiSEIA modules",
-      "description": "SSDP plus optional /24 TCP 57223 scan. Returns discovered hosts.",
+      "description": "Discover CZ-T006 / TaiSEIA modules via SSDP and optional /24 TCP 57223 scan. Does not write to devices.",
       "fields": {
         "include_subnet_scan": {
-          "name": "Include subnet port scan",
-          "description": "Also scan the local /24 for open TCP 57223 (slower)."
+          "name": "Include /24 port scan",
+          "description": "Also probe every host on the HA subnet for open TCP 57223 (slower, more complete). Turn off for a quick SSDP-only pass."
         }
       }
     }

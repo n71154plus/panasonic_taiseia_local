@@ -152,20 +152,12 @@ Each device also has a diagnostic **Probe info** sensor (attributes include the 
 | `panasonic_taiseia_local.write_service` | **Advanced:** write one service (may change device state) |
 | `panasonic_taiseia_local.scan_lan` | SSDP + optional /24 `:57223` scan |
 
-Example (YAML; enable response):
+Example (Developer tools → Actions; enable response):
 
-```yaml
-service: panasonic_taiseia_local.read_service
-data:
-  entry_id: YOUR_DEVICE_ENTRY_ID
-  service: "0x00"
-```
-
-```yaml
-service: panasonic_taiseia_local.scan_lan
-data:
-  include_subnet_scan: true
-```
+1. Choose `panasonic_taiseia_local.read_service`
+2. **Device**: pick the AC/dehumidifier with the selector (do not paste raw IDs)
+3. **Service id**: choose `0x00` from the dropdown, or type e.g. `0x15`
+4. Check `value` / `decoded` in the response
 
 Use `write_service` only for advanced testing, and only against **configured** entries. Prefer diagnostics download / `probe_device` / `read_service` when filing issues.
 
