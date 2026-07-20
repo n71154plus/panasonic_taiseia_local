@@ -18,14 +18,14 @@
       },
       "import_devices": {
         "title": "Select LAN devices to import",
-        "description": "Matched cloud inventory to LAN MAC addresses. Non-local devices (e.g. fridge) are listed below and will not be imported.\n\nSkipped / not on LAN:\n{skipped}",
+        "description": "Matched cloud inventory to LAN MACs. If SSDP/scan misses a module, EMS UserGetGWIP is used to probe TCP 57223. UX/PX/RX ACs import fine when the Wi‑Fi module opens that port — empty lists are usually network/VLAN, not ModelType.\n\nSkipped / not locally controllable:\n{skipped}",
         "data": {
           "devices": "Import devices"
         }
       },
       "discover": {
         "title": "Select discovered device",
-        "description": "Scanned LAN port 57223 and SSDP. ModelType selects the CommandList feature set.",
+        "description": "Scanned LAN port 57223 and SSDP. Empty list? Keep HA and the module on the same LAN, allow TCP 57223, or use manual IP. ModelType (including UX) only picks the CommandList mapping.",
         "data": {
           "device": "Device",
           "name": "Display name (optional)",
@@ -35,7 +35,7 @@
       },
       "manual": {
         "title": "Manual setup",
-        "description": "Enter the CZ-T006 module LAN IP.",
+        "description": "Enter the TaiSEIA Wi‑Fi module LAN IP (e.g. CZ-T006). Find it via the router or official EMS/App. ModelType (UX, PXGD, …) only affects command mapping.",
         "data": {
           "host": "Host IP",
           "name": "Display name (optional)",
@@ -56,7 +56,7 @@
     },
     "error": {
       "cannot_connect": "Cannot connect. Check the IP and port 57223.",
-      "no_devices": "No importable LAN devices found.",
+      "no_devices": "No locally controllable devices found. Same LAN + open TCP 57223 required, or enter the IP manually. Cloud-only units cannot use this integration.",
       "no_selection": "Select at least one device, or import later from the integration menu.",
       "auth": "Invalid username or password.",
       "cloud_api": "Cloud API request failed. Try again later."

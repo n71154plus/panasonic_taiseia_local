@@ -115,22 +115,37 @@ async def _port_open(host: str, port: int, timeout: float = 0.4) -> bool:
         return False
 
 
-async def _subnet_hosts(hass_host_hint: str | None = None) -> list[str]:
-    """Best-effort /24 scan based on local outbound IP."""
-    hint = hass_host_hint
-    if not hint:
+async def _subnet_hosts(
+    hass_host_hint: str | None = None,
+    *,
+    extra_hints: list[str] | None = None,
+) -> list[str]:
+    """Best-effort /24 scan based on local outbound IP (+ optional hints)."""
+    hints: list[str] = []
+    for candidate in [hass_host_hint, *(extra_hints or [])]:
+        if candidate and candidate not in hints:
+            hints.append(candidate)
+    if not hints:
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("8.8.8.8", 80))
-            hint = s.getsockname()[0]
+            hints.append(s.getsockname()[0])
             s.close()
         except Exception:  # noqa: BLE001
             return []
-    parts = hint.split(".")
-    if len(parts) != 4:
-        return []
-    prefix = ".".join(parts[:3])
-    return [f"{prefix}.{i}" for i in range(1, 255)]
+
+    hosts: list[str] = []
+    seen_prefixes: set[str] = set()
+    for hint in hints:
+        parts = hint.split(".")
+        if len(parts) != 4:
+            continue
+        prefix = ".".join(parts[:3])
+        if prefix in seen_prefixes:
+            continue
+        seen_prefixes.add(prefix)
+        hosts.extend(f"{prefix}.{i}" for i in range(1, 255))
+    return hosts
 
 
 async def _scan_port_57223(hosts: list[str], limit: int = 64) -> set[str]:
@@ -176,12 +191,13 @@ async def async_discover_devices(
     session: aiohttp.ClientSession,
     *,
     include_subnet_scan: bool = True,
+    subnet_hints: list[str] | None = None,
 ) -> list[DiscoveredDevice]:
     """SSDP first, optionally fall back to subnet TCP scan on :57223."""
     hosts = await _ssdp_search()
     _LOGGER.debug("SSDP candidates: %s", hosts)
     if include_subnet_scan:
-        subnet = await _subnet_hosts()
+        subnet = await _subnet_hosts(extra_hints=subnet_hints)
         if subnet:
             open_hosts = await _scan_port_57223(subnet)
             hosts |= open_hosts
@@ -200,13 +216,16 @@ async def async_find_host_by_mac(
     mac: str,
     *,
     include_subnet_scan: bool = True,
+    subnet_hints: list[str] | None = None,
 ) -> DiscoveredDevice | None:
     """Re-locate a module after DHCP gave it a new IP (match by MAC)."""
     want = _normalize_mac(mac)
     if not want:
         return None
     found = await async_discover_devices(
-        session, include_subnet_scan=include_subnet_scan
+        session,
+        include_subnet_scan=include_subnet_scan,
+        subnet_hints=subnet_hints,
     )
     for dev in found:
         if _normalize_mac(dev.mac) == want:

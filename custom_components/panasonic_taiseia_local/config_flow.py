@@ -217,36 +217,64 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             },
         )
 
+    def _subnet_hints(self) -> list[str]:
+        hints: list[str] = []
+        local_ip = getattr(self.hass.config, "local_ip", None)
+        if local_ip:
+            hints.append(str(local_ip))
+        return hints
+
+    async def _async_cloud_client(self) -> CloudAccount | None:
+        """Cloud client from in-progress login or existing hub entry."""
+        session = async_get_clientsession(self.hass)
+        if self._account and self._password:
+            return CloudAccount(
+                session,
+                self._account,
+                self._password,
+                refresh_token=self._refresh_token,
+                cp_token=self._cp_token,
+            )
+        hub = _hub_entry(self.hass)
+        if not hub:
+            return None
+        return CloudAccount(
+            session,
+            hub.data.get(CONF_USERNAME, ""),
+            hub.data.get(CONF_PASSWORD, ""),
+            refresh_token=hub.data.get(CONF_REFRESH_TOKEN),
+            cp_token=hub.data.get(CONF_CP_TOKEN),
+        )
+
     async def _async_build_import_candidates(self) -> dict[str, str]:
         """Merge cloud inventory with LAN discovery. Return key → label."""
         session = async_get_clientsession(self.hass)
         try:
-            found = await async_discover_devices(session, include_subnet_scan=True)
+            found = await async_discover_devices(
+                session,
+                include_subnet_scan=True,
+                subnet_hints=self._subnet_hints(),
+            )
         except Exception:  # noqa: BLE001
             found = []
         by_mac = {(d.mac or "").upper(): d for d in found if d.mac}
 
+        cloud = await self._async_cloud_client()
         # Refresh cloud list if we have hub credentials but empty cache
-        if not self._cloud_devices:
-            hub = _hub_entry(self.hass)
-            if hub:
-                session = async_get_clientsession(self.hass)
-                cloud = CloudAccount(
-                    session,
-                    hub.data.get(CONF_USERNAME, ""),
-                    hub.data.get(CONF_PASSWORD, ""),
-                    refresh_token=hub.data.get(CONF_REFRESH_TOKEN),
-                    cp_token=hub.data.get(CONF_CP_TOKEN),
-                )
-                try:
-                    self._cloud_devices = await cloud.async_get_devices()
-                    # Persist refreshed tokens
+        if not self._cloud_devices and cloud is not None:
+            try:
+                self._cloud_devices = await cloud.async_get_devices()
+                hub = _hub_entry(self.hass)
+                if hub is not None:
                     new_data = dict(hub.data)
                     new_data[CONF_CP_TOKEN] = cloud.cp_token
                     new_data[CONF_REFRESH_TOKEN] = cloud.refresh_token
                     self.hass.config_entries.async_update_entry(hub, data=new_data)
-                except Exception:  # noqa: BLE001
-                    self._cloud_devices = []
+                if self._account:
+                    self._cp_token = cloud.cp_token
+                    self._refresh_token = cloud.refresh_token
+            except Exception:  # noqa: BLE001
+                self._cloud_devices = []
 
         configured = _configured_macs(self.hass)
         self._import_candidates = {}
@@ -263,10 +291,39 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 continue
             local = by_mac.get(mac)
             type_name = DEVICE_TYPE_NAMES.get(cd.device_type, str(cd.device_type))
+            source = "區網掃描"
+
+            # SSDP /24 often miss modules on other VLANs or wrong Docker subnet —
+            # ask EMS for last-known LAN IP (works for UX / PX / … alike).
+            if local is None and cloud is not None:
+                try:
+                    gw_ip = await cloud.async_get_gw_ip(cd.gwid)
+                except Exception:  # noqa: BLE001
+                    gw_ip = None
+                if gw_ip:
+                    probed = await async_probe_host(session, gw_ip)
+                    if probed is None:
+                        choices[f"skip:{mac}"] = (
+                            f"{cd.nickname} · {cd.model} · {cd.model_type or '?'} "
+                            f"· {gw_ip} [埠 57223 不通，無法本地控制]"
+                        )
+                        continue
+                    probed_mac = (probed.mac or "").upper()
+                    if probed_mac and probed_mac != mac:
+                        choices[f"skip:{mac}"] = (
+                            f"{cd.nickname} · {cd.model} · {cd.model_type or '?'} "
+                            f"· {gw_ip} [官網 IP 對到其他模組 {probed_mac}]"
+                        )
+                        continue
+                    local = probed
+                    by_mac[mac] = probed
+                    source = "官網 IP"
+
             if local:
                 label = (
                     f"{cd.nickname} · {cd.model or local.model} · "
-                    f"{cd.model_type or '?'} · {local.host} [{type_name}]"
+                    f"{cd.model_type or '?'} · {local.host} "
+                    f"[{type_name} · {source}]"
                 )
                 self._import_candidates[mac] = {
                     CONF_HOST: local.host,
@@ -279,13 +336,11 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
                 choices[mac] = label
             else:
-                # Cloud knows it but LAN miss — still list as unavailable note
-                label = (
-                    f"{cd.nickname} · {cd.model} · {cd.model_type} "
-                    f"[區網未發現，略過]"
+                choices[f"skip:{mac}"] = (
+                    f"{cd.nickname} · {cd.model} · {cd.model_type or '?'} "
+                    f"[區網未發現：請確認與 HA 同網段、模組有開 TCP 57223，"
+                    f"或改用「手動輸入 IP」]"
                 )
-                # not selectable
-                choices[f"skip:{mac}"] = label
 
         # LAN devices not in cloud
         for mac, local in by_mac.items():
@@ -443,7 +498,11 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         session = async_get_clientsession(self.hass)
         try:
-            found = await async_discover_devices(session, include_subnet_scan=True)
+            found = await async_discover_devices(
+                session,
+                include_subnet_scan=True,
+                subnet_hints=self._subnet_hints(),
+            )
         except Exception:  # noqa: BLE001
             found = []
 

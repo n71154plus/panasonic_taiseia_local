@@ -18,14 +18,14 @@
       },
       "import_devices": {
         "title": "選擇要匯入的區網設備",
-        "description": "已用官網清單對應區網 MAC。無法本地控制的設備（例如冰箱）列於下方，不會匯入。\n\n略過／非區網：\n{skipped}",
+        "description": "已用官網清單對應區網 MAC；掃不到時會再問官網要模組 IP（UserGetGWIP）並探測埠 57223。UX／PX／RX 等冷氣只要模組有開本地埠即可匯入——找不到通常是網段或未開 57223，不是機型名稱問題。\n\n略過／無法本地控制：\n{skipped}",
         "data": {
           "devices": "匯入設備"
         }
       },
       "discover": {
         "title": "選擇發現的設備",
-        "description": "已掃描區網埠 57223 與 SSDP。ModelType 決定可用功能（來自官方 App CommandList）；不確定可選自動。",
+        "description": "已掃描區網埠 57223 與 SSDP。若清單為空：確認 HA 與 Wi‑Fi 模組同一區網、防火牆放行 57223，或改「手動輸入 IP」。ModelType（含 UX）決定功能對照，與能否被掃到無關。",
         "data": {
           "device": "設備",
           "name": "顯示名稱（選填）",
@@ -35,7 +35,7 @@
       },
       "manual": {
         "title": "手動新增",
-        "description": "輸入 CZ-T006 模組的區網 IP。ModelType 對應 App 指令表。",
+        "description": "輸入 TaiSEIA Wi‑Fi 模組（如 CZ-T006）的區網 IP。路由器或官方 App／EMS 可查 IP。ModelType 選 UX／PXGD 等僅影響指令對照。",
         "data": {
           "host": "主機 IP",
           "name": "顯示名稱（選填）",
@@ -56,7 +56,7 @@
     },
     "error": {
       "cannot_connect": "無法連線到裝置，請確認 IP 與埠 57223。",
-      "no_devices": "未發現可匯入的區網設備。請確認設備與 HA 在同一區網，或改手動輸入 IP。",
+      "no_devices": "未發現可本地控制的設備。請確認與 HA 同區網、模組開著 TCP 57223，或改手動輸入 IP；僅雲端可控的機種無法用本整合。",
       "no_selection": "請至少選擇一台設備，或稍後再從整合選單匯入。",
       "auth": "帳號或密碼錯誤。",
       "cloud_api": "官網 API 連線失敗，請稍後再試。"

@@ -57,6 +57,8 @@ This integration only talks to the **TaiSEIA LAN port TCP 57223** (UPnP `SetSaan
 
 In practice: Taiwan units that expose `57223` on the LAN and show one of the ModelTypes above in EMS / the official app are treated as **stable**. You can override ModelType in device options; when unsure, try **PXGD** (AC) or **JHW** (dehumidifier) first.
 
+**“UX / PX not found”:** **UX** is already in CommandList. Most reports are discovery misses (wrong Docker subnet, VLAN, no open `57223`), not an unsupported series. Prefer EMS account import (falls back to EMS module IP) or enter the module IP from the router.
+
 ### Conditional (needs `57223`; fewer ModelTypes)
 
 | Class | Type | Notes |
