@@ -86,20 +86,6 @@ Override ModelType in device options. Name in the table but device not found →
 
 The official app does **not** use SetSaanet for normal remote control. This component is a **parallel local protocol** on the same hardware port.
 
-### BLE evaluation (skipped under “no pairing; need useful reads”)
-
-All official-app BLE code lives in **`OnboardingManager`**. Day-to-day UIs (e.g. refrigerator main) have **zero** BLE usage.
-
-GATT commands are only:
-
-| BLE / SoftAP command | Purpose |
-| --- | --- |
-| `GetProfile` / `GetMacAddr` / `GetStatus` | Module identity / onboarding status (not AC temp, not fridge door) |
-| `GetSsidList` / `GetSecurityType` / `SsidPskSetup` / `STAConnect` | Scan Wi‑Fi, write home credentials |
-| `Regist` / `StartRegMode` / `StopRegMode` | Cloud registration / end reg mode |
-
-**Conclusion:** After excluding pairing, BLE exposes **no HA-useful readable or writable state**. This integration **will not implement BLE**. Use a cloud integration for units without `57223`; a future fridge project should be cloud-based, not an extension of SetSaanet here.
-
 ## Features
 
 - Local polling for **climate** (AC) and **humidifier** (dehumidifier) platforms
