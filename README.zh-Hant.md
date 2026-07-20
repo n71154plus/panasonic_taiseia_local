@@ -133,7 +133,43 @@ TaiSEIA 規格尚有洗衣機、烘衣機、電視、電扇、熱泵熱水器、
 
 **仍可能失敗的情況：** 沒記到 MAC（例如早期手動只填 IP）、模組與 HA 不在同一 /24、VLAN 隔離、或新 IP 上根本沒開 `57223`。這時請在路由器綁固定 IP，或到整合選項／重新設定流程用「區網搜尋」再加一次（同一 MAC 會更新既有條目）。
 
-## 除錯
+## 診斷與測試
+
+### 下載診斷（回報 issue 用）
+
+1. **設定 → 裝置與服務 → Panasonic TaiSEIA Local**
+2. 開啟 Hub 或裝置條目 → 相關裝置 → **下載診斷**
+3. 將 JSON 附在 GitHub issue（密碼／token 會自動遮罩）
+
+裝置上也有診斷感測器 **「探測資訊」**（屬性含服務清單與即時狀態）。
+
+### 開發者服務（開發者工具 → 服務）
+
+| 服務 | 用途 |
+| --- | --- |
+| `panasonic_taiseia_local.probe_device` | 重跑 probe，回傳服務清單 |
+| `panasonic_taiseia_local.read_service` | 讀單一服務（`service`: `0x00` 或整數） |
+| `panasonic_taiseia_local.write_service` | **進階**：寫入單一服務（可能改變設備狀態） |
+| `panasonic_taiseia_local.scan_lan` | SSDP + 可選 /24 `:57223` 掃描 |
+
+範例（YAML，請勾選「回傳回應」）：
+
+```yaml
+service: panasonic_taiseia_local.read_service
+data:
+  entry_id: YOUR_DEVICE_ENTRY_ID
+  service: "0x00"
+```
+
+```yaml
+service: panasonic_taiseia_local.scan_lan
+data:
+  include_subnet_scan: true
+```
+
+`write_service` 僅供進階測試，且只能操作**已設定**的裝置條目；回報問題時請優先用診斷下載／`probe_device`／`read_service`。
+
+### 除錯日誌
 
 在 `configuration.yaml` 加入：
 

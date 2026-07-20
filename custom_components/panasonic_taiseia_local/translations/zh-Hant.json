@@ -94,5 +94,71 @@
         }
       }
     }
+  },
+  "services": {
+    "probe_device": {
+      "name": "探測裝置",
+      "description": "對已設定裝置重跑 TaiSEIA probe，回傳服務清單（開發用）。",
+      "fields": {
+        "entry_id": {
+          "name": "設定條目 ID",
+          "description": "裝置 config entry ID（或改填 device_id）。"
+        },
+        "device_id": {
+          "name": "裝置 ID",
+          "description": "Home Assistant 裝置登錄 ID。"
+        }
+      }
+    },
+    "read_service": {
+      "name": "讀取 TaiSEIA 服務",
+      "description": "從已設定裝置讀取單一 TaiSEIA 服務值。",
+      "fields": {
+        "entry_id": {
+          "name": "設定條目 ID",
+          "description": "裝置 config entry ID（或改填 device_id）。"
+        },
+        "device_id": {
+          "name": "裝置 ID",
+          "description": "Home Assistant 裝置登錄 ID。"
+        },
+        "service": {
+          "name": "服務",
+          "description": "服務編號（整數或十六進位，例如 0x00）。"
+        }
+      }
+    },
+    "write_service": {
+      "name": "寫入 TaiSEIA 服務",
+      "description": "進階：寫入原始 TaiSEIA 服務值，可能改變設備狀態。僅限已設定的條目。",
+      "fields": {
+        "entry_id": {
+          "name": "設定條目 ID",
+          "description": "裝置 config entry ID（或改填 device_id）。"
+        },
+        "device_id": {
+          "name": "裝置 ID",
+          "description": "Home Assistant 裝置登錄 ID。"
+        },
+        "service": {
+          "name": "服務",
+          "description": "服務編號（整數或十六進位，例如 0x12）。"
+        },
+        "value": {
+          "name": "數值",
+          "description": "要寫入的整數值。"
+        }
+      }
+    },
+    "scan_lan": {
+      "name": "掃描區網 TaiSEIA 模組",
+      "description": "SSDP，可選再掃本機 /24 的 TCP 57223，回傳發現清單。",
+      "fields": {
+        "include_subnet_scan": {
+          "name": "包含子網埠掃描",
+          "description": "是否額外掃描區網 /24 開啟 57223 的主機（較慢）。"
+        }
+      }
+    }
   }
 }

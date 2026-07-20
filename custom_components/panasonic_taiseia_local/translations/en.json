@@ -94,5 +94,71 @@
         }
       }
     }
+  },
+  "services": {
+    "probe_device": {
+      "name": "Probe device",
+      "description": "Re-run TaiSEIA probe on a configured device and return the service list (developer tool).",
+      "fields": {
+        "entry_id": {
+          "name": "Config entry ID",
+          "description": "Device config entry ID (or use device_id)."
+        },
+        "device_id": {
+          "name": "Device ID",
+          "description": "Home Assistant device registry ID."
+        }
+      }
+    },
+    "read_service": {
+      "name": "Read TaiSEIA service",
+      "description": "Read a single TaiSEIA service value from a configured device.",
+      "fields": {
+        "entry_id": {
+          "name": "Config entry ID",
+          "description": "Device config entry ID (or use device_id)."
+        },
+        "device_id": {
+          "name": "Device ID",
+          "description": "Home Assistant device registry ID."
+        },
+        "service": {
+          "name": "Service",
+          "description": "Service id as int or hex (e.g. 0x00 or 18)."
+        }
+      }
+    },
+    "write_service": {
+      "name": "Write TaiSEIA service",
+      "description": "ADVANCED: write a raw TaiSEIA service value. May change device state. Only for configured entries.",
+      "fields": {
+        "entry_id": {
+          "name": "Config entry ID",
+          "description": "Device config entry ID (or use device_id)."
+        },
+        "device_id": {
+          "name": "Device ID",
+          "description": "Home Assistant device registry ID."
+        },
+        "service": {
+          "name": "Service",
+          "description": "Service id as int or hex (e.g. 0x12)."
+        },
+        "value": {
+          "name": "Value",
+          "description": "Integer value to write."
+        }
+      }
+    },
+    "scan_lan": {
+      "name": "Scan LAN for TaiSEIA modules",
+      "description": "SSDP plus optional /24 TCP 57223 scan. Returns discovered hosts.",
+      "fields": {
+        "include_subnet_scan": {
+          "name": "Include subnet port scan",
+          "description": "Also scan the local /24 for open TCP 57223 (slower)."
+        }
+      }
+    }
   }
 }

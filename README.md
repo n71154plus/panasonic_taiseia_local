@@ -133,7 +133,43 @@ Config entries store the last-known IP, but identity is **MAC-based** (`unique_i
 
 **May still fail if:** no MAC was stored (manual IP-only add), HA and the module are not on the same /24, VLANs block discovery, or the new address does not open `57223`. In those cases, reserve a static lease on the router, or re-run LAN discovery (same MAC updates the existing entry).
 
-## Debugging
+## Diagnostics and testing
+
+### Download diagnostics (for bug reports)
+
+1. **Settings → Devices & services → Panasonic TaiSEIA Local**
+2. Open the hub or device entry → related device → **Download diagnostics**
+3. Attach the JSON to a GitHub issue (passwords / tokens are redacted)
+
+Each device also has a diagnostic **Probe info** sensor (attributes include the service list and live status).
+
+### Developer services (Developer tools → Services)
+
+| Service | Purpose |
+| --- | --- |
+| `panasonic_taiseia_local.probe_device` | Re-run probe; return service list |
+| `panasonic_taiseia_local.read_service` | Read one service (`service`: `0x00` or int) |
+| `panasonic_taiseia_local.write_service` | **Advanced:** write one service (may change device state) |
+| `panasonic_taiseia_local.scan_lan` | SSDP + optional /24 `:57223` scan |
+
+Example (YAML; enable response):
+
+```yaml
+service: panasonic_taiseia_local.read_service
+data:
+  entry_id: YOUR_DEVICE_ENTRY_ID
+  service: "0x00"
+```
+
+```yaml
+service: panasonic_taiseia_local.scan_lan
+data:
+  include_subnet_scan: true
+```
+
+Use `write_service` only for advanced testing, and only against **configured** entries. Prefer diagnostics download / `probe_device` / `read_service` when filing issues.
+
+### Debug logging
 
 Add to `configuration.yaml`:
 
