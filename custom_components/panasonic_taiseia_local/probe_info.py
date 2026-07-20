@@ -140,6 +140,37 @@ _LABELS_AC: dict[int, str] = {
     SVC_OPERATING_POWER: LABEL_OPERATING_POWER,
     SVC_PM25: LABEL_PM25,
     SVC_PM25_FLAG: "PM2.5 旗標",
+    # TaiSEIA Table_10 / open refs (often omitted from App CommandList)
+    0x06: "舒眠計時",
+    0x07: "模糊溫度",
+    0x09: "時鐘開機",
+    0x0A: "時鐘關機",
+    0x0D: "系統時間",
+    0x0E: "上下自動風向",
+    0x10: "左右自動風向",
+    0x13: "除濕濕度設定",
+    0x14: "室內濕度",
+    0x15: "系統點檢",
+    0x16: "空氣偵測",
+    0x1C: "功率限制",
+    0x1D: "遙控器鎖定",
+    0x20: "保濕模式",
+    0x22: "室內機耗電",
+    0x23: "室外機耗電",
+    0x24: "室外機電流",
+    0x25: "室外機電壓",
+    0x26: "室外機功率因數",
+    0x28: "累計耗電",
+    0x29: "顯示錯誤",
+    0x2A: "錯誤履歷1",
+    0x2B: "錯誤履歷2",
+    0x2C: "錯誤履歷3",
+    0x2D: "錯誤履歷4",
+    0x2E: "錯誤履歷5",
+    0x2F: "保養累計運轉時數",
+    0x30: "濾網累計運轉時數",
+    0x33: "本月耗電",
+    0x34: "時間到關2",
     0x53: "監測防霉",
     0x54: "監測防霉",
     0x56: LABEL_CLIMATE_MOLD_PREVENTION,
@@ -221,6 +252,15 @@ def service_label(
         if service_id in typed:
             return typed[service_id]
     return SERVICE_LABELS.get(service_id, f"服務 0x{service_id:02X}")
+
+
+def is_known_service_label(name: str) -> bool:
+    """True when the name comes from App/TaiSEIA tables (not anonymous 服務 0xNN)."""
+    return bool(name) and not str(name).startswith("服務 ")
+
+
+def is_known_service(service_id: int, sa_type: int | None = None) -> bool:
+    return is_known_service_label(service_label(service_id, sa_type))
 
 
 def format_service_line(

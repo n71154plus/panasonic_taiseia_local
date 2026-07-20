@@ -22,11 +22,47 @@ _OWNED_BY_HUMIDIFIER = {0x00, 0x01, 0x04}
 
 # TaiSEIA-only sensors often missing from CommandList (still useful locally).
 _EXTRA_AC_SENSORS = (
+    (0x14, "室內濕度", "humidity"),
+    (0x15, "系統點檢", None),
     (0x21, "室外溫度", "temperature"),
+    (0x22, "室內機耗電", "energy"),
+    (0x23, "室外機耗電", "energy"),
+    (0x24, "室外機電流", None),
     (0x27, "即時功率", "power"),
+    (0x29, "顯示錯誤", None),
     (0x37, "PM2.5", "pm25"),
 )
-_EXTRA_AC_BINARY = ((0x12, "濾網清洗通知"),)
+_EXTRA_AC_BINARY = (
+    (0x12, "濾網清洗通知"),
+    (0x38, "PM2.5 旗標"),
+)
+
+# Prefer these kinds when building from device 0x07 (overrides span heuristics).
+# Values: switch | binary_sensor | sensor
+_AC_SERVICE_KIND: dict[int, str] = {
+    0x0E: "switch",  # 上下自動風向
+    0x10: "switch",  # 左右自動風向
+    0x12: "binary_sensor",  # 濾網
+    0x15: "sensor",  # 系統點檢
+    0x16: "switch",  # 空氣偵測
+    0x17: "switch",  # 乾燥防霉
+    0x22: "sensor",
+    0x23: "sensor",
+    0x24: "sensor",
+    0x25: "sensor",
+    0x26: "sensor",
+    0x28: "sensor",
+    0x29: "sensor",
+    0x2A: "sensor",
+    0x2B: "sensor",
+    0x2C: "sensor",
+    0x2D: "sensor",
+    0x2E: "sensor",
+    0x2F: "sensor",
+    0x30: "sensor",
+    0x33: "sensor",
+    0x38: "binary_sensor",  # PM2.5 旗標
+}
 _EXTRA_RF_SENSORS = (
     (0x03, "冷凍溫度", "temperature"),
     (0x05, "冷藏溫度", "temperature"),
@@ -57,7 +93,14 @@ _ICON_RULES = (
     ("急速", "mdi:clock-fast"),
     ("睡眠", "mdi:sleep"),
     ("舒眠", "mdi:sleep"),
-    ("睡眠", "mdi:sleep"),
+    ("點檢", "mdi:stethoscope"),
+    ("耗電", "mdi:lightning-bolt"),
+    ("電流", "mdi:current-ac"),
+    ("電壓", "mdi:flash"),
+    ("錯誤", "mdi:alert"),
+    ("偵測", "mdi:air-purifier"),
+    ("旗標", "mdi:flag-outline"),
+    ("濾網", "mdi:air-filter"),
     ("防霉", "mdi:weather-windy"),
     ("自體淨", "mdi:broom"),
     ("提示音", "mdi:volume-high"),
@@ -71,7 +114,6 @@ _ICON_RULES = (
     ("pm", "mdi:dots-hexagon"),
     ("異味", "mdi:air-filter"),
     ("滿水", "mdi:cup-water"),
-    ("錯誤", "mdi:alert"),
     ("ai", "mdi:brain"),
     ("製冰", "mdi:ice-cream"),
     ("除霜", "mdi:car-defrost-rear"),
@@ -263,7 +305,10 @@ def _toggle_inverted(option_map: dict[int, str]) -> bool:
 
 
 def _is_binary_name(name: str) -> bool:
-    return any(k in name for k in ("警告", "滿水", "通知", "錯誤"))
+    return any(
+        k in name
+        for k in ("警告", "滿水", "通知", "旗標")
+    )
 
 
 def _sensor_hint(name: str) -> str | None:
@@ -271,10 +316,31 @@ def _sensor_hint(name: str) -> str | None:
         return "temperature"
     if "濕" in name:
         return "humidity"
-    if "功率" in name or "耗電" in name:
+    if "即時功率" in name or name.endswith("功率"):
+        return "power"
+    if "耗電" in name:
+        return "energy"
+    if "功率" in name:
         return "power"
     if "PM" in name.upper() or "pm" in name.lower():
         return "pm25"
+    return None
+
+
+def _known_service_kind(
+    sa_type_id: int, service_id: int, *, writable: bool, span: int
+) -> str | None:
+    """Return preferred entity kind for well-known TaiSEIA services."""
+    if sa_type_id == TYPE_AC:
+        kind = _AC_SERVICE_KIND.get(service_id)
+        if kind == "switch" and not writable:
+            # Spec says RW but module advertises RO → expose as binary/sensor.
+            return "binary_sensor" if span <= 1 else "sensor"
+        if kind:
+            return kind
+    # Heuristic: 0/1 only
+    if span <= 1:
+        return "switch" if writable else "binary_sensor"
     return None
 
 
@@ -291,6 +357,25 @@ def classify_command(cmd: CommandDef, device_type: int) -> ClassifiedCommand:
     pt = cmd.parameter_type
     icon = _icon_for(cmd.name)
 
+    # Honour TaiSEIA kind table when CommandDef was built as a plain sensor.
+    if device_type == TYPE_AC and _AC_SERVICE_KIND.get(cmd.service) == "sensor":
+        if pt in ("", "binary"):
+            return ClassifiedCommand(
+                command=cmd,
+                kind="sensor",
+                icon=icon,
+                device_class_hint=_sensor_hint(cmd.name),
+            )
+
+    if pt == "binary":
+        hint = "problem" if _is_binary_name(cmd.name) else None
+        return ClassifiedCommand(
+            command=cmd,
+            kind="binary_sensor",
+            icon=icon,
+            device_class_hint=hint,
+        )
+
     if pt == "enum":
         option_map = parse_enum_params(cmd.parameters)
         if _is_toggle_enum(option_map):
@@ -306,10 +391,20 @@ def classify_command(cmd: CommandDef, device_type: int) -> ClassifiedCommand:
         )
 
     if pt == "rangeA":
+        option_map = parse_range_a_params(cmd.parameters)
+        # App 左右風向：Auto + 1..N 段（與 TaiSEIA 段數語意對齊）
+        if "左右" in cmd.name:
+            from .const import CLIMATE_AVAILABLE_SWING_LR
+
+            labeled = {
+                k: CLIMATE_AVAILABLE_SWING_LR.get(k, f"{k}段" if k else "自動")
+                for k in option_map
+            }
+            option_map = labeled
         return ClassifiedCommand(
             command=cmd,
             kind="select",
-            option_map=parse_range_a_params(cmd.parameters),
+            option_map=option_map,
             icon=icon,
         )
 
@@ -339,6 +434,55 @@ def classify_command(cmd: CommandDef, device_type: int) -> ClassifiedCommand:
     )
 
 
+def _command_from_device_service(
+    sa_type_id: int,
+    sid: int,
+    info: Any,
+    *,
+    name: str,
+) -> CommandDef:
+    """Build a CommandDef from a TaiSEIA 0x07 service descriptor."""
+    writable = bool(getattr(info, "writable", False))
+    try:
+        lo = int(getattr(info, "min_value", 0))
+        hi = int(getattr(info, "max_value", 0))
+    except (TypeError, ValueError):
+        lo, hi = 0, 0
+    if hi < lo:
+        lo, hi = hi, lo
+    span = hi - lo
+
+    kind = _known_service_kind(sa_type_id, sid, writable=writable, span=span)
+
+    if kind == "switch" or (kind is None and writable and span <= 1):
+        return CommandDef(
+            sid,
+            name,
+            "enum",
+            [["關閉", lo], ["開啟", hi if hi != lo else lo + 1]],
+            "",
+        )
+    if kind == "binary_sensor" or (kind is None and (not writable) and span <= 1):
+        return CommandDef(sid, name, "binary", [], "")
+    if kind == "sensor" or not writable:
+        return CommandDef(sid, name, "", [], "")
+    if span <= 20:
+        return CommandDef(
+            sid,
+            name,
+            "enum",
+            [[str(i), i] for i in range(lo, hi + 1)],
+            "",
+        )
+    return CommandDef(
+        sid,
+        name,
+        "range",
+        [["Min", lo], ["Max", hi]],
+        "",
+    )
+
+
 def build_profile(model_type: str) -> DeviceProfile | None:
     cat = load_catalog()
     info = cat.get(model_type)
@@ -363,7 +507,7 @@ def build_generic_profile(
 ) -> DeviceProfile:
     """Build entities from TaiSEIA service descriptors when no CommandList exists."""
     from .const import DEVICE_TYPE_NAMES
-    from .probe_info import service_label
+    from .probe_info import is_known_service_label, service_label
 
     services = services or {}
     commands: list[CommandDef] = []
@@ -372,44 +516,9 @@ def build_generic_profile(
 
     for sid, info in sorted(services.items()):
         name = service_label(sid, sa_type_id)
-        if name.startswith("服務 "):
+        if not is_known_service_label(name):
             name = f"{name}（裝置回報）"
-        writable = bool(getattr(info, "writable", False))
-        try:
-            lo = int(getattr(info, "min_value", 0))
-            hi = int(getattr(info, "max_value", 0))
-        except (TypeError, ValueError):
-            lo, hi = 0, 0
-        if hi < lo:
-            lo, hi = hi, lo
-        span = hi - lo
-
-        if not writable:
-            cmd = CommandDef(sid, name, "", [], "")
-        elif span <= 1:
-            cmd = CommandDef(
-                sid,
-                name,
-                "enum",
-                [["關", lo], ["開", hi if hi != lo else lo + 1]],
-                "",
-            )
-        elif span <= 20:
-            cmd = CommandDef(
-                sid,
-                name,
-                "enum",
-                [[str(i), i] for i in range(lo, hi + 1)],
-                "",
-            )
-        else:
-            cmd = CommandDef(
-                sid,
-                name,
-                "range",
-                [["Min", lo], ["Max", hi]],
-                "",
-            )
+        cmd = _command_from_device_service(sa_type_id, sid, info, name=name)
         commands.append(cmd)
         classified.append(classify_command(cmd, sa_type_id))
 
@@ -429,42 +538,36 @@ def merge_hidden_device_services(
 ) -> DeviceProfile:
     """Add entities for services the module advertises but App CommandList omits.
 
-    Panasonic sometimes exposes extra TaiSEIA services on the LAN that never
-    appear in the official App CommandList. Keep App names for listed commands;
-    surface the rest as generic entities so they are still visible/controllable.
+    Known TaiSEIA / App names keep a clean label. Only anonymous
+    ``服務 0xNN`` entries are marked ``（裝置回報）``.
     """
+    from .probe_info import is_known_service_label, service_label
+
     services = services or {}
     present = {c.service for c in profile.commands}
     missing = {sid: info for sid, info in services.items() if sid not in present}
     if not missing:
         return profile
 
-    hidden = build_generic_profile(profile.device_type, missing)
-    # Mark names so users can tell App vs hidden LAN-only services.
-    renamed_commands: list[CommandDef] = []
-    for cmd in hidden.commands:
-        label = cmd.name
-        if "（裝置回報）" not in label:
-            label = f"{label}（裝置回報）"
-        renamed_commands.append(
-            CommandDef(
-                cmd.service,
-                label,
-                cmd.parameter_type,
-                list(cmd.parameters),
-                cmd.unit,
-            )
+    commands: list[CommandDef] = []
+    classified: list[ClassifiedCommand] = []
+    for sid, info in sorted(missing.items()):
+        name = service_label(sid, profile.device_type)
+        if not is_known_service_label(name):
+            name = f"{name}（裝置回報）"
+        cmd = _command_from_device_service(
+            profile.device_type, sid, info, name=name
         )
-    hidden_classified = [
-        classify_command(c, profile.device_type) for c in renamed_commands
-    ]
+        commands.append(cmd)
+        classified.append(classify_command(cmd, profile.device_type))
+
     return DeviceProfile(
         model_type=profile.model_type,
         device_type=profile.device_type,
         device_name=profile.device_name,
         protocol=profile.protocol,
-        commands=[*profile.commands, *renamed_commands],
-        classified=[*profile.classified, *hidden_classified],
+        commands=[*profile.commands, *commands],
+        classified=[*profile.classified, *classified],
     )
 
 
