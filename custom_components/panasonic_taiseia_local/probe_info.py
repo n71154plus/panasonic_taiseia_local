@@ -118,12 +118,12 @@ from .taiseia import DeviceInfo, ServiceInfo
 
 _LABELS_AC: dict[int, str] = {
     SVC_POWER: "電源",
-    SVC_MODE: "運轉模式",
+    SVC_MODE: "運轉",  # App CommandList（非「運轉模式」）
     SVC_FAN: "風量",
     SVC_TEMP_SET: "溫度設定",
     SVC_TEMP_IN: "室內溫度",
     SVC_SLEEP: LABEL_CLIMATE_SLEEP,
-    SVC_NANOE: LABEL_NANOE,
+    SVC_NANOE: LABEL_NANOEX,  # 多數機種；少數為 nanoe／濾網重置 → 由 ModelType 覆寫
     SVC_TIMER_ON: LABEL_CLIMATE_ON_TIMER,
     SVC_TIMER_OFF: LABEL_CLIMATE_OFF_TIMER,
     SVC_SWING: "上下風向",
@@ -154,7 +154,7 @@ _LABELS_DEHUMIDIFIER: dict[int, str] = {
     SVC_DH_HUMIDITY_IN: LABEL_HUMIDITY,
     SVC_DH_FAN_DIR: LABEL_DH_FAN_DIR,
     SVC_DH_TANK: LABEL_TANK,
-    SVC_DH_NANOE: LABEL_NANOEX,
+    SVC_DH_NANOE: "nanoeX(脫臭)",  # 少數機種僅 nanoe → ModelType 覆寫
     SVC_DH_FAN: LABEL_DH_FAN,
     SVC_DH_BUZZER: LABEL_BUZZER,
     0x50: "錯誤訊息警告",
@@ -192,8 +192,8 @@ _LABELS_AIR_CLEANER: dict[int, str] = {
     0x07: LABEL_NANOEX,
     0x50: LABEL_PM25,
     0x51: "PM25 Level",
-    0x52: "異味 Level",
-    0x53: LABEL_DH_OFF_TIMER,
+    0x52: "Nioi Level",  # App CommandList 原文
+    0x53: LABEL_DH_OFF_TIMER,  # App：時間到關（單位分鐘）
 }
 
 SERVICE_LABELS_BY_TYPE: dict[int, dict[int, str]] = {
@@ -349,15 +349,21 @@ def _decode_dehumidifier(service_id: int, val: int) -> str | None:
 
 
 def _decode_refrigerator(service_id: int, val: int) -> str | None:
+    # App F657 setpoints are enum (弱/中/強…), not °C. Only live temp sensors use °C.
     if service_id in (
-        SVC_RF_FREEZER_SET,
-        SVC_RF_FRIDGE_SET,
-        SVC_RF_PARTIAL_SET,
         SVC_RF_FREEZER_TEMP,
         SVC_RF_FRIDGE_TEMP,
         SVC_RF_PARTIAL_TEMP,
     ):
         return f"{_signed_temp(val)}°C"
+    if service_id in (
+        SVC_RF_FREEZER_SET,
+        SVC_RF_FRIDGE_SET,
+        SVC_RF_PARTIAL_SET,
+    ):
+        # Common App enum; unknown values stay numeric (may be hidden/raw).
+        mapped = {0: "弱", 2: "中", 4: "強", 6: "冰溫"}.get(val)
+        return mapped if mapped is not None else str(val)
     if service_id in (
         SVC_RF_ECO,
         SVC_RF_DEFROST,
@@ -379,7 +385,8 @@ def _decode_air_cleaner(service_id: int, val: int) -> str | None:
     if service_id in (0x50,):
         return f"{val} µg/m³"
     if service_id == 0x53:
-        return f"{val} 時"
+        # App LHW/LHW-40：時間到關，單位分鐘
+        return f"{val} 分"
     return str(val)
 
 

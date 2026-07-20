@@ -65,11 +65,11 @@ from panasonic_taiseia_local.taiseia import ServiceInfo  # noqa: E402
 class TypeAwareServiceLabelsTest(unittest.TestCase):
     def test_same_service_id_differs_by_device_type(self) -> None:
         self.assertEqual(service_label(0x02, TYPE_AC), "風量")
-        self.assertEqual(service_label(0x02, TYPE_DEHUMIDIFIER), "定時關機")
+        self.assertEqual(service_label(0x02, TYPE_DEHUMIDIFIER), "時間到關")
         self.assertEqual(service_label(0x04, TYPE_AC), "室內溫度")
         self.assertEqual(service_label(0x04, TYPE_DEHUMIDIFIER), "濕度設定")
         self.assertEqual(service_label(0x00, TYPE_AC), "電源")
-        self.assertEqual(service_label(0x00, TYPE_REFRIGERATOR), "冷凍溫度設定")
+        self.assertEqual(service_label(0x00, TYPE_REFRIGERATOR), "冷凍庫溫設定")
         self.assertEqual(service_label(0x01, TYPE_AIR_CLEANER), "風量")
 
     def test_name_overrides_from_commandlist_win(self) -> None:
@@ -81,6 +81,11 @@ class TypeAwareServiceLabelsTest(unittest.TestCase):
             ),
             "nanoeX(脫臭)",
         )
+        # ModelType variants (e.g. AC 0x08 = 濾網重置 on some models)
+        self.assertEqual(
+            service_label(0x08, TYPE_AC, name_overrides={0x08: "濾網重置"}),
+            "濾網重置",
+        )
 
     def test_services_as_list_uses_type_labels(self) -> None:
         services = {
@@ -88,12 +93,17 @@ class TypeAwareServiceLabelsTest(unittest.TestCase):
             0x04: ServiceInfo(0x04, True, 0, 6),
         }
         lines = services_as_list(services, sa_type=TYPE_DEHUMIDIFIER)
-        self.assertIn("0x02 定時關機 [讀寫] 0–12", lines)
+        self.assertIn("0x02 時間到關 [讀寫] 0–12", lines)
         self.assertIn("0x04 濕度設定 [讀寫] 0–6", lines)
 
     def test_refrigerator_status_not_decoded_as_power(self) -> None:
+        # App F657: 0x00 is setpoint enum, not power / not °C
         self.assertEqual(
-            decode_status_value(TYPE_REFRIGERATOR, 0x00, "-18"),
+            decode_status_value(TYPE_REFRIGERATOR, 0x00, "2"),
+            "中",
+        )
+        self.assertEqual(
+            decode_status_value(TYPE_REFRIGERATOR, 0x03, "238"),
             "-18°C",
         )
         self.assertEqual(
@@ -111,6 +121,12 @@ class TypeAwareServiceLabelsTest(unittest.TestCase):
             "58%",
         )
 
+    def test_air_cleaner_timer_is_minutes(self) -> None:
+        self.assertEqual(
+            decode_status_value(TYPE_AIR_CLEANER, 0x53, "60"),
+            "60 分",
+        )
+
     def test_status_highlights_are_type_specific(self) -> None:
         ac = status_highlights({"0x00": "1", "0x04": "26"}, TYPE_AC)
         self.assertIn("電源", ac)
@@ -123,8 +139,9 @@ class TypeAwareServiceLabelsTest(unittest.TestCase):
         self.assertEqual(dh["濕度設定"], "55%")
         self.assertNotIn("室內溫度", dh)
 
-        rf = status_highlights({"0x00": "238"}, TYPE_REFRIGERATOR)  # -18 signed
-        self.assertIn("冷凍溫度設定", rf)
+        rf = status_highlights({"0x00": "2", "0x03": "238"}, TYPE_REFRIGERATOR)
+        self.assertIn("冷凍庫溫設定", rf)
+        self.assertEqual(rf["冷凍庫溫設定"], "中")
         self.assertNotIn("電源", rf)
 
 

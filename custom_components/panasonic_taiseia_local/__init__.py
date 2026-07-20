@@ -14,7 +14,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .catalog import build_generic_profile, build_profile, resolve_model_type
+from .catalog import build_generic_profile, build_profile, merge_hidden_device_services, resolve_model_type
 from .cloud_sync import async_ensure_hub_device, async_sync_cloud_to_devices
 from .const import (
     CONF_CLOUD_GWID,
@@ -238,7 +238,6 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         profile = build_generic_profile(
             client.device.sa_type_id, client.device.services
         )
-        client.poll_services = list(client.device.services.keys()) or profile.service_ids
         _LOGGER.info(
             "TaiSEIA %s using generic service profile type=0x%02X (%s services)",
             host,
@@ -246,13 +245,26 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             len(profile.commands),
         )
     else:
-        client.poll_services = profile.service_ids
+        before = len(profile.commands)
+        profile = merge_hidden_device_services(profile, client.device.services)
+        hidden_n = len(profile.commands) - before
         _LOGGER.info(
-            "TaiSEIA %s using CommandList ModelType=%s (%s cmds)",
+            "TaiSEIA %s using CommandList ModelType=%s (%s cmds, +%s device-only)",
             host,
             model_type,
-            len(profile.commands),
+            before,
+            hidden_n,
         )
+
+    # Poll App CommandList services plus anything the module advertises (hidden).
+    client.poll_services = list(
+        dict.fromkeys(
+            [
+                *profile.service_ids,
+                *client.device.services.keys(),
+            ]
+        )
+    )
 
     if changed:
         hass.config_entries.async_update_entry(entry, data=new_data, title=new_title)

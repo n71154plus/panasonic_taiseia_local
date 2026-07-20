@@ -57,6 +57,7 @@ _ICON_RULES = (
     ("急速", "mdi:clock-fast"),
     ("睡眠", "mdi:sleep"),
     ("舒眠", "mdi:sleep"),
+    ("睡眠", "mdi:sleep"),
     ("防霉", "mdi:weather-windy"),
     ("自體淨", "mdi:broom"),
     ("提示音", "mdi:volume-high"),
@@ -362,6 +363,7 @@ def build_generic_profile(
 ) -> DeviceProfile:
     """Build entities from TaiSEIA service descriptors when no CommandList exists."""
     from .const import DEVICE_TYPE_NAMES
+    from .probe_info import service_label
 
     services = services or {}
     commands: list[CommandDef] = []
@@ -369,7 +371,9 @@ def build_generic_profile(
     device_name = DEVICE_TYPE_NAMES.get(sa_type_id, f"0x{sa_type_id:02X}")
 
     for sid, info in sorted(services.items()):
-        name = f"服務 0x{sid:02X}"
+        name = service_label(sid, sa_type_id)
+        if name.startswith("服務 "):
+            name = f"{name}（裝置回報）"
         writable = bool(getattr(info, "writable", False))
         try:
             lo = int(getattr(info, "min_value", 0))
@@ -416,6 +420,51 @@ def build_generic_profile(
         protocol="SAANET",
         commands=commands,
         classified=classified,
+    )
+
+
+def merge_hidden_device_services(
+    profile: DeviceProfile,
+    services: dict[int, Any] | None,
+) -> DeviceProfile:
+    """Add entities for services the module advertises but App CommandList omits.
+
+    Panasonic sometimes exposes extra TaiSEIA services on the LAN that never
+    appear in the official App CommandList. Keep App names for listed commands;
+    surface the rest as generic entities so they are still visible/controllable.
+    """
+    services = services or {}
+    present = {c.service for c in profile.commands}
+    missing = {sid: info for sid, info in services.items() if sid not in present}
+    if not missing:
+        return profile
+
+    hidden = build_generic_profile(profile.device_type, missing)
+    # Mark names so users can tell App vs hidden LAN-only services.
+    renamed_commands: list[CommandDef] = []
+    for cmd in hidden.commands:
+        label = cmd.name
+        if "（裝置回報）" not in label:
+            label = f"{label}（裝置回報）"
+        renamed_commands.append(
+            CommandDef(
+                cmd.service,
+                label,
+                cmd.parameter_type,
+                list(cmd.parameters),
+                cmd.unit,
+            )
+        )
+    hidden_classified = [
+        classify_command(c, profile.device_type) for c in renamed_commands
+    ]
+    return DeviceProfile(
+        model_type=profile.model_type,
+        device_type=profile.device_type,
+        device_name=profile.device_name,
+        protocol=profile.protocol,
+        commands=[*profile.commands, *renamed_commands],
+        classified=[*profile.classified, *hidden_classified],
     )
 
 
