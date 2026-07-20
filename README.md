@@ -86,17 +86,19 @@ Override ModelType in device options. Name in the table but device not found →
 
 The official app does **not** use SetSaanet for normal remote control. This component is a **parallel local protocol** on the same hardware port.
 
-### BLE evaluation (not added)
+### BLE evaluation (skipped under “no pairing; need useful reads”)
 
-App BLE is mainly for **onboarding / writing home Wi‑Fi** (GATT commands similar to SoftAP GetProfile / Regist), **not** day-to-day control after pairing.
+All official-app BLE code lives in **`OnboardingManager`**. Day-to-day UIs (e.g. refrigerator main) have **zero** BLE usage.
 
-| If we added BLE to HA | Outcome |
+GATT commands are only:
+
+| BLE / SoftAP command | Purpose |
 | --- | --- |
-| AC / dehumidifier | Local control still needs **57223**; BLE does not fix a closed port |
-| Refrigerator | After pairing the app also uses the **cloud**; BLE is a short window |
-| Cost | Bluetooth adapter on the HA host, proximity, fragile GATT reverse-engineering |
+| `GetProfile` / `GetMacAddr` / `GetStatus` | Module identity / onboarding status (not AC temp, not fridge door) |
+| `GetSsidList` / `GetSecurityType` / `SsidPskSetup` / `STAConnect` | Scan Wi‑Fi, write home credentials |
+| `Regist` / `StartRegMode` / `StopRegMode` | Cloud registration / end reg mode |
 
-**Decision: BLE stays out of this integration.** For fridges / units without `57223`, keep the official app or a cloud HA integration (e.g. `panasonic_smart_app`). A future “cloud fridge” component would be a **separate** project, not an extension of SetSaanet here.
+**Conclusion:** After excluding pairing, BLE exposes **no HA-useful readable or writable state**. This integration **will not implement BLE**. Use a cloud integration for units without `57223`; a future fridge project should be cloud-based, not an extension of SetSaanet here.
 
 ## Features
 
