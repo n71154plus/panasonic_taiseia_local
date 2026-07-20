@@ -392,15 +392,33 @@ class TaiSeiaProbeInfoSensor(TaiSeiaBaseEntity, SensorEntity):
         status = self.device_status
         data = self.coordinator.data or {}
         entry = self.hass.config_entries.async_get_entry(self.entry_id)
+        profile = (
+            self.hass.data.get(DOMAIN, {})
+            .get(self.entry_id, {})
+            .get(DATA_PROFILE)
+        )
+        name_overrides = (
+            {cmd.service: cmd.name for cmd in profile.commands}
+            if profile is not None
+            else None
+        )
         attrs: dict = {
             "設備類型": type_summary(d),
             "ModelType": data.get("model_type"),
             "類型代碼": f"0x{d.sa_type_id:02X}",
             "服務數量": len(d.services),
-            "服務清單": services_as_list(d.services),
+            "服務清單": services_as_list(
+                d.services,
+                sa_type=d.sa_type_id,
+                name_overrides=name_overrides,
+            ),
             "即時狀態數量": len(status),
             "狀態摘要": status_highlights(status, d.sa_type_id),
-            "即時狀態": status_as_list(status, sa_type=d.sa_type_id),
+            "即時狀態": status_as_list(
+                status,
+                sa_type=d.sa_type_id,
+                name_overrides=name_overrides,
+            ),
             "即時狀態原始": dict(status),
             "IP": d.host or self.client.host,
             "埠": d.port or self.client.port,
