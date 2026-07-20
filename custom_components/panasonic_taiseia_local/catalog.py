@@ -283,21 +283,43 @@ def _icon_for(name: str) -> str:
     return "mdi:tune"
 
 
+# Two-value App enums that should become HA switches (not selects).
+_TOGGLE_LABEL_PAIRS = (
+    frozenset({"關閉", "開啟"}),
+    frozenset({"開", "關"}),
+    frozenset({"停止", "運轉"}),
+    frozenset({"停止", "啟動"}),  # 冰箱製冰停止／快速製冰
+    frozenset({"通常", "運作中"}),  # ECO設定
+    frozenset({"通常", "除霜中"}),  # 除霜設定
+    frozenset({"OFF", "ON"}),
+    frozenset({"Off", "On"}),
+)
+
+
 def _is_toggle_enum(option_map: dict[int, str]) -> bool:
     if len(option_map) != 2:
         return False
     labels = set(option_map.values())
+    if labels in _TOGGLE_LABEL_PAIRS:
+        return True
     joined = "".join(labels)
-    if labels <= {"關閉", "開啟", "開", "關", "停止", "運轉", "OFF", "ON", "Off", "On"}:
+    if {"關閉", "開啟"} <= labels or {"停止", "運轉"} <= labels or {"停止", "啟動"} <= labels:
         return True
-    if {"關閉", "開啟"} <= labels or {"停止", "運轉"} <= labels:
-        return True
-    return "開" in joined and "關" in joined and len(option_map) == 2
+    return "開" in joined and "關" in joined
 
 
 def _toggle_inverted(option_map: dict[int, str]) -> bool:
-    """True when 'on' label maps to 0 (e.g. 操作提示音 開啟=0)."""
-    on_labels = {"開啟", "開", "運轉", "ON", "On"}
+    """True when the 'active/on' label maps to 0 (e.g. 操作提示音 開啟=0)."""
+    on_labels = {
+        "開啟",
+        "開",
+        "運轉",
+        "啟動",
+        "運作中",
+        "除霜中",
+        "ON",
+        "On",
+    }
     for value, label in option_map.items():
         if label in on_labels or label.endswith("開"):
             return value == 0
@@ -307,7 +329,7 @@ def _toggle_inverted(option_map: dict[int, str]) -> bool:
 def _is_binary_name(name: str) -> bool:
     return any(
         k in name
-        for k in ("警告", "滿水", "通知", "旗標")
+        for k in ("警告", "滿水", "通知", "旗標", "AI舒適")
     )
 
 
