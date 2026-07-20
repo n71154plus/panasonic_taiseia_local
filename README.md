@@ -82,7 +82,7 @@ Override ModelType in device options. Name in the table but device not found →
 | Pairing (app) | Day-to-day (app) | This integration |
 | --- | --- | --- |
 | AC / dehumidifier: SoftAP `pana-aircondition-*` / `panasonicsmart-*` → `192.168.1.1:57223`, or BLE pairing | **Cloud** `DeviceSetCommand` | If LAN `57223` stays open → **SetSaanet works** |
-| Fridge: SoftAP `Panasonic-NR-*` → `192.168.102.1`, or BLE+QR | **Cloud only** | **No** 57223 path; see BLE note |
+| Fridge: SoftAP `Panasonic-NR-*` → `192.168.102.1`, or BLE+QR | **Cloud only** | **No** 57223 path |
 
 The official app does **not** use SetSaanet for normal remote control. This component is a **parallel local protocol** on the same hardware port.
 
