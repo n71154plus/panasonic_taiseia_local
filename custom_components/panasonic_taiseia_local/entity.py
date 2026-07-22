@@ -7,9 +7,9 @@ from abc import ABC, abstractmethod
 from homeassistant.helpers.device_registry import CONNECTION_NETWORK_MAC
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, MANUFACTURER
+from .const import DATA_CONTROL, DOMAIN, MANUFACTURER
 from .probe_info import type_summary
-from .taiseia import TaiSeiaClient
+from .taiseia import TaiSeiaClient, status_key
 
 
 class TaiSeiaBaseEntity(CoordinatorEntity, ABC):
@@ -64,13 +64,17 @@ class TaiSeiaBaseEntity(CoordinatorEntity, ABC):
             "manufacturer": d.manufacturer or MANUFACTURER,
             "model": " · ".join(str(b) for b in model_bits if b),
             "connections": connections,
-            "configuration_url": f"http://{host}:{port}",
         }
+        if host and host not in ("", "0.0.0.0"):
+            info["configuration_url"] = f"http://{host}:{port}"
         fw = d.sw_version or ""
         cloud_nick = data.get("cloud_nickname")
+        path = data.get("control_path")
         sw_bits = [b for b in (fw, f"狀態×{len(status)}") if b]
         if cloud_nick:
             sw_bits.append(f"雲端:{cloud_nick}")
+        if path:
+            sw_bits.append(f"路徑:{path}")
         if sw_bits:
             info["sw_version"] = " · ".join(sw_bits)
         hw_parts = [
@@ -82,7 +86,12 @@ class TaiSeiaBaseEntity(CoordinatorEntity, ABC):
             )
             if p
         ]
-        hw_parts.extend([host, f"服務×{len(d.services)}"])
+        if host and host not in ("", "0.0.0.0"):
+            hw_parts.append(host)
+        hw_parts.append(f"服務×{len(d.services)}")
+        mode = data.get("control_mode")
+        if mode:
+            hw_parts.append(f"控制:{mode}")
         info["hw_version"] = " · ".join(str(p) for p in hw_parts)
         serial = data.get("cloud_gwid") or d.mac
         if serial:
@@ -121,7 +130,20 @@ class TaiSeiaBaseEntity(CoordinatorEntity, ABC):
                 return raw is not None and raw != ""
         return False
 
-    def set_local_status(self, status_key: str, value) -> None:
-        self.coordinator.update_local_state(status_key, value)  # type: ignore[attr-defined]
+    def set_local_status(self, status_key_name: str, value) -> None:
+        self.coordinator.update_local_state(status_key_name, value)  # type: ignore[attr-defined]
         self.coordinator.async_set_updated_data(self.coordinator.data)
         self.async_write_ha_state()
+
+    async def async_device_write(self, service: int, value: int) -> None:
+        """Write via DeviceControl facade (hybrid/local/cloud)."""
+        slot = (self.hass.data.get(DOMAIN) or {}).get(self.entry_id) or {}
+        control = slot.get(DATA_CONTROL)
+        if control is not None:
+            path = await control.async_write(service, value)
+            data = dict(self.coordinator.data or {})
+            data["control_path"] = path
+            self.coordinator.async_set_updated_data(data)
+            return
+        await self.client.async_write_device(service, value)
+        self.set_local_status(status_key(service), str(value))

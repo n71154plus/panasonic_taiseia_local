@@ -92,7 +92,7 @@ class TaiSeiaFilterCleanedButton(TaiSeiaBaseEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         try:
-            await self.client.async_write_device(SVC_FILTER_NOTIFY, 0)
+            await self.async_device_write(SVC_FILTER_NOTIFY, 0)
         except Exception as err:  # noqa: BLE001
             raise HomeAssistantError(
                 f"無法重置{LABEL_FILTER_NOTIFY}: {err}"

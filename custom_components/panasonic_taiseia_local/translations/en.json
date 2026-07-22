@@ -18,7 +18,7 @@
       },
       "import_devices": {
         "title": "Select LAN devices to import",
-        "description": "Matched cloud inventory to LAN MACs. If SSDP/scan misses a module, EMS UserGetGWIP is used to probe TCP 57223. UX/PX/RX ACs import fine when the Wi‑Fi module opens that port — empty lists are usually network/VLAN, not ModelType.\n\nSkipped / not locally controllable:\n{skipped}",
+        "description": "Select devices from your Panasonic EMS account. LAN modules are preferred when reachable. Devices without a LAN module appear as cloud-only and can still be imported.\n\nNote:\n{skipped}",
         "data": {
           "devices": "Import devices"
         }
@@ -71,7 +71,7 @@
     "step": {
       "init": {
         "title": "Panasonic TaiSEIA options",
-        "description": "Hub: account, LAN tunables, energy cycle (shared). Device: name, ModelType, poll interval, house total. Without a hub, shared fields appear on the device options.",
+        "description": "Hub: account, LAN tunables, energy cycle (shared). Device: name, ModelType, poll interval, house total, control path (hybrid/local/cloud), control path (hybrid/local/cloud). Without a hub, shared fields appear on the device options.",
         "data": {
           "password": "Update password (leave blank to keep)",
           "refresh_cloud": "Re-login and refresh tokens",
@@ -90,7 +90,8 @@
           "energy_reset_day": "Day of month to reset (1–28, monthly only)",
           "energy_reset_weekday": "Weekday to reset (weekly only)",
           "energy_reset_period": "Reset period energy now",
-          "energy_reset_total": "Reset total energy now"
+          "energy_reset_total": "Reset total energy now",
+          "control_mode": "Control path (hybrid = cloud-first write / LAN-first read)"
         }
       }
     }

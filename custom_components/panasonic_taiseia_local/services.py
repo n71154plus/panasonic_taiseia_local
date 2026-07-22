@@ -17,6 +17,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .const import (
     CONF_ENTRY_TYPE,
     DATA_CLIENT,
+    DATA_CONTROL,
     DATA_COORDINATOR,
     DATA_PROFILE,
     DOMAIN,
@@ -177,7 +178,14 @@ async def _async_handle_write(hass: HomeAssistant, call: ServiceCall) -> dict[st
         service_id,
         value,
     )
-    written = await client.async_write_device(service_id, value)
+    control = data.get(DATA_CONTROL)
+    if control is not None:
+        path = await control.async_write(service_id, value)
+        written = value
+        response_extra = {"control_path": path}
+    else:
+        written = await client.async_write_device(service_id, value)
+        response_extra = {}
     coordinator = data.get(DATA_COORDINATOR)
     if coordinator is not None:
         await coordinator.async_request_refresh()
@@ -193,6 +201,7 @@ async def _async_handle_write(hass: HomeAssistant, call: ServiceCall) -> dict[st
         "name": service_label(service_id, sa_type, name_overrides=overrides),
         "written_value": value,
         "response_value": written,
+        **response_extra,
     }
 
 

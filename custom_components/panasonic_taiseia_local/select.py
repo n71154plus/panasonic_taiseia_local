@@ -120,4 +120,4 @@ class TaiSeiaSelect(TaiSeiaBaseEntity, SelectEntity):
             return
         store = value if value >= 0 else (value + 256)
         self.set_local_status(self._status_key, str(store))
-        await self.client.async_write_device(self._service, store & 0xFFFF)
+        await self.async_device_write(self._service, store & 0xFFFF)

@@ -17,11 +17,15 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .catalog import build_generic_profile, build_profile, merge_hidden_device_services, resolve_model_type
 from .cloud_sync import async_ensure_hub_device, async_sync_cloud_to_devices
 from .const import (
+    CONF_CLOUD_AUTH,
+    CONF_CLOUD_DEVICE_TYPE,
     CONF_CLOUD_GWID,
     CONF_CLOUD_MODEL,
     CONF_CLOUD_MODEL_ID,
     CONF_CLOUD_MODEL_TYPE,
     CONF_CLOUD_NICKNAME,
+    CONF_CONTROL_MODE,
+    CONF_DEVICE_TYPE,
     CONF_ENERGY_ENABLED,
     CONF_ENERGY_INCLUDE_HOUSE,
     CONF_ENTRY_TYPE,
@@ -29,7 +33,9 @@ from .const import (
     CONF_INDOOR_MODEL,
     CONF_MODEL_TYPE,
     CONF_UPDATE_INTERVAL,
+    CONTROL_MODE_CLOUD,
     DATA_CLIENT,
+    DATA_CONTROL,
     DATA_COORDINATOR,
     DATA_ENERGY,
     DATA_PROFILE,
@@ -40,6 +46,13 @@ from .const import (
     PLATFORMS,
     STATUS_OPERATING_POWER,
     SVC_OPERATING_POWER,
+    TYPE_AC,
+)
+from .control import (
+    DeviceControl,
+    default_cloud_command_types,
+    entry_has_cloud_creds,
+    resolve_control_mode,
 )
 from .discovery import async_find_host_by_mac
 from .energy import (
@@ -49,8 +62,8 @@ from .energy import (
     period_label,
 )
 from .lan_settings import async_get_lan_settings
-from .naming import async_suggest_name, format_local_title, looks_like_module_model
-from .taiseia import TaiSeiaClient, configure_lan_concurrency
+from .naming import async_suggest_name, format_cloud_title, format_local_title, looks_like_module_model
+from .taiseia import ServiceInfo, TaiSeiaClient, configure_lan_concurrency
 
 _LOGGER = logging.getLogger(__package__)
 
@@ -160,7 +173,7 @@ async def _async_rebinding_host(
 
 
 async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    host = entry.data[CONF_HOST]
+    host = entry.data.get(CONF_HOST) or "0.0.0.0"
     session = async_get_clientsession(hass)
     lan = await async_get_lan_settings(hass)
     configure_lan_concurrency(lan.max_concurrent)
@@ -172,28 +185,87 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         retry_delay=lan.retry_delay,
     )
 
-    stagger = _setup_stagger_seconds(host)
-    if stagger:
-        await asyncio.sleep(stagger)
+    intentionally_cloud = host in ("", "0.0.0.0") and (
+        entry_has_cloud_creds(entry)
+        or bool(entry.data.get(CONF_CLOUD_GWID))
+        or bool(entry.data.get("cloud_only"))
+        or entry.options.get(CONF_CONTROL_MODE) == CONTROL_MODE_CLOUD
+    )
 
-    try:
-        await client.async_probe()
-    except Exception as err:
-        rebound = await _async_rebinding_host(
-            hass, entry, client, reason="setup unreachable"
+    lan_ok = False
+    cloud_only = False
+
+    if intentionally_cloud:
+        cloud_only = True
+        sa_type = int(
+            entry.data.get(CONF_DEVICE_TYPE)
+            or entry.data.get(CONF_CLOUD_DEVICE_TYPE)
+            or TYPE_AC
         )
-        if rebound:
-            try:
-                await client.async_probe()
-            except Exception as err2:
-                raise ConfigEntryNotReady(
-                    f"Cannot reach TaiSEIA device at {rebound}: {err2}"
-                ) from err2
-            host = rebound
-        else:
-            raise ConfigEntryNotReady(
-                f"Cannot reach TaiSEIA device at {host}: {err}"
-            ) from err
+        client.device.sa_type_id = sa_type
+        client.device.host = host
+        mac = _entry_mac(entry)
+        if mac:
+            client.device.mac = mac
+        gwid = (entry.data.get(CONF_CLOUD_GWID) or "").strip()
+        if gwid:
+            client.device.udn = f"gwid:{gwid.lower()}"
+        _LOGGER.info(
+            "TaiSEIA cloud-only setup for %s (GWID=%s)",
+            entry.title or host,
+            gwid or "?",
+        )
+    else:
+        stagger = _setup_stagger_seconds(host)
+        if stagger:
+            await asyncio.sleep(stagger)
+
+        try:
+            await client.async_probe()
+            lan_ok = True
+        except Exception as err:
+            rebound = await _async_rebinding_host(
+                hass, entry, client, reason="setup unreachable"
+            )
+            if rebound:
+                try:
+                    await client.async_probe()
+                    lan_ok = True
+                    host = rebound
+                except Exception as err2:
+                    err = err2
+            if not lan_ok:
+                if entry_has_cloud_creds(entry) or entry.data.get(CONF_CLOUD_GWID):
+                    cloud_only = True
+                    _LOGGER.warning(
+                        "TaiSEIA %s LAN unreachable (%s); starting cloud-only",
+                        host,
+                        err,
+                    )
+                    sa_type = int(
+                        entry.data.get(CONF_DEVICE_TYPE)
+                        or entry.data.get(CONF_CLOUD_DEVICE_TYPE)
+                        or TYPE_AC
+                    )
+                    client.device.sa_type_id = sa_type
+                    client.device.host = host
+                    mac = _entry_mac(entry)
+                    if mac:
+                        client.device.mac = mac
+                    gwid = (entry.data.get(CONF_CLOUD_GWID) or "").strip()
+                    if gwid and not client.device.mac:
+                        client.device.udn = f"gwid:{gwid.lower()}"
+                else:
+                    raise ConfigEntryNotReady(
+                        f"Cannot reach TaiSEIA device at {host}: {err}"
+                    ) from err
+
+    # Cloud-only devices are locked to cloud control mode
+    if cloud_only:
+        opts = dict(entry.options)
+        if opts.get(CONF_CONTROL_MODE) != CONTROL_MODE_CLOUD:
+            opts[CONF_CONTROL_MODE] = CONTROL_MODE_CLOUD
+            hass.config_entries.async_update_entry(entry, options=opts)
 
     new_data = dict(entry.data)
     changed = False
@@ -203,7 +275,7 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if client.device.mac and new_data.get("mac") != client.device.mac.upper():
         new_data["mac"] = client.device.mac.upper()
         changed = True
-    if new_data.get(CONF_HOST) != client.host:
+    if lan_ok and new_data.get(CONF_HOST) != client.host:
         new_data[CONF_HOST] = client.host
         host = client.host
         changed = True
@@ -223,10 +295,37 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if looks_like_module_model(entry.data.get(CONF_NAME)) or looks_like_module_model(
             entry.title
         ):
-            nice = format_local_title(suggested.nickname)
+            nice = (
+                format_cloud_title(suggested.nickname)
+                if cloud_only
+                else format_local_title(suggested.nickname)
+            )
             new_data[CONF_NAME] = nice
             new_title = nice
             changed = True
+
+    # Fix wrong (本地) suffix on intentional cloud-only entries
+    if cloud_only:
+        cur_name = str(new_data.get(CONF_NAME) or new_title or "")
+        nick = (
+            new_data.get(CONF_CLOUD_NICKNAME)
+            or new_data.get(CONF_NAME)
+            or entry.title
+            or ""
+        )
+        if "(本地)" in cur_name or looks_like_module_model(cur_name):
+            # strip path tag for rebuild
+            base = cur_name
+            for suffix in (" (本地)", " (雲端)", "(本地)", "(雲端)"):
+                if base.endswith(suffix):
+                    base = base[: -len(suffix)].rstrip()
+                    break
+            source = new_data.get(CONF_CLOUD_NICKNAME) or base or nick
+            nice = format_cloud_title(str(source))
+            if new_data.get(CONF_NAME) != nice:
+                new_data[CONF_NAME] = nice
+                new_title = nice
+                changed = True
 
     model_type = resolve_model_type(
         new_data.get(CONF_MODEL_TYPE) or entry.options.get(CONF_MODEL_TYPE),
@@ -260,6 +359,10 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hidden_n,
         )
 
+    if cloud_only and not client.device.services:
+        for sid in profile.service_ids:
+            client.device.services[sid] = ServiceInfo(sid, True, 0, 65535)
+
     # Poll App CommandList services plus anything the module advertises (hidden).
     client.poll_services = list(
         dict.fromkeys(
@@ -283,29 +386,65 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry_id = entry.entry_id
     last_rediscover_mono = 0.0
 
+    control = DeviceControl(
+        hass,
+        entry,
+        client,
+        cloud_only=cloud_only,
+        lan_ok=lan_ok,
+    )
+    cloud_types = default_cloud_command_types(list(client.poll_services or []))
+
     async def async_update_data():
-        nonlocal last_rediscover_mono
+        nonlocal last_rediscover_mono, lan_ok
         live = hass.config_entries.async_get_entry(entry_id)
         current_host = client.host
+        path = "unknown"
         try:
-            status = await client.async_fetch_status()
+            status, path = await control.async_fetch_status(cloud_types)
+            if path == "lan":
+                lan_ok = True
+                control.lan_ok = True
         except Exception as err:
-            now = time.monotonic()
-            if now - last_rediscover_mono >= _HOST_REDISCOVER_COOLDOWN_S:
-                last_rediscover_mono = now
-                live_entry = live or entry
-                rebound = await _async_rebinding_host(
-                    hass, live_entry, client, reason="poll unreachable"
-                )
-                if rebound:
-                    try:
-                        status = await client.async_fetch_status()
-                        current_host = rebound
-                    except Exception as err2:
-                        raise UpdateFailed(
-                            f"TaiSEIA update failed for {rebound}: "
-                            f"{type(err2).__name__}: {err2}"
-                        ) from err2
+            if control.mode != CONTROL_MODE_CLOUD and not cloud_only:
+                now = time.monotonic()
+                if now - last_rediscover_mono >= _HOST_REDISCOVER_COOLDOWN_S:
+                    last_rediscover_mono = now
+                    live_entry = live or entry
+                    rebound = await _async_rebinding_host(
+                        hass, live_entry, client, reason="poll unreachable"
+                    )
+                    if rebound:
+                        try:
+                            status, path = await control.async_fetch_status(cloud_types)
+                            current_host = rebound
+                            lan_ok = True
+                            control.lan_ok = True
+                        except Exception as err2:
+                            raise UpdateFailed(
+                                f"TaiSEIA update failed for {rebound}: "
+                                f"{type(err2).__name__}: {err2}"
+                            ) from err2
+                    else:
+                        # Last chance: cloud assist if hybrid with credentials
+                        if entry_has_cloud_creds(live or entry) or (
+                            live or entry
+                        ).data.get(CONF_CLOUD_GWID):
+                            try:
+                                control.lan_ok = False
+                                status, path = await control.async_fetch_status(
+                                    cloud_types
+                                )
+                            except Exception as err3:
+                                raise UpdateFailed(
+                                    f"TaiSEIA update failed for {current_host}: "
+                                    f"{type(err3).__name__}: {err3}"
+                                ) from err3
+                        else:
+                            raise UpdateFailed(
+                                f"TaiSEIA update failed for {current_host}: "
+                                f"{type(err).__name__}: {err}"
+                            ) from err
                 else:
                     raise UpdateFailed(
                         f"TaiSEIA update failed for {current_host}: "
@@ -313,8 +452,7 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     ) from err
             else:
                 raise UpdateFailed(
-                    f"TaiSEIA update failed for {current_host}: "
-                    f"{type(err).__name__}: {err}"
+                    f"TaiSEIA cloud update failed: {type(err).__name__}: {err}"
                 ) from err
 
         try:
@@ -330,9 +468,9 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         power_w = None
                 energy_tracker.update(power_w)
                 await async_save_tracker(hass, entry_id, energy_tracker)
-            # Re-read entry data so cloud sync / IP rebind show up without reload
             live = hass.config_entries.async_get_entry(entry_id)
             live_data = live.data if live else new_data
+            live_entry = live or entry
             return {
                 "status": status,
                 "device": client.device,
@@ -346,6 +484,11 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "cloud_model_id": live_data.get(CONF_CLOUD_MODEL_ID),
                 "cloud_model_type": live_data.get(CONF_CLOUD_MODEL_TYPE),
                 "cloud_gwid": live_data.get(CONF_CLOUD_GWID),
+                "control_mode": resolve_control_mode(
+                    live_entry, cloud_only=cloud_only
+                ),
+                "control_path": path,
+                "cloud_only": cloud_only,
                 "energy_total_kwh": energy_tracker.total_kwh,
                 "energy_monthly_kwh": energy_tracker.period_kwh,
                 "energy_period_kwh": energy_tracker.period_kwh,
@@ -390,7 +533,10 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator.update_local_state = update_local_state  # type: ignore[attr-defined]
 
     base_interval = _interval(entry)
-    skew = sum(ord(c) for c in host) % 5
+    skew = sum(ord(c) for c in str(host)) % 5
+    # Cloud-only: poll less aggressively to respect EMS limits
+    if cloud_only:
+        base_interval = max(base_interval, 60)
     coordinator.update_interval = timedelta(seconds=base_interval + skew)
 
     await coordinator.async_config_entry_first_refresh()
@@ -400,6 +546,7 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         DATA_COORDINATOR: coordinator,
         DATA_PROFILE: profile,
         DATA_ENERGY: energy_tracker,
+        DATA_CONTROL: control,
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

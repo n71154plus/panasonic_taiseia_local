@@ -123,4 +123,4 @@ class TaiSeiaTimerNumber(TaiSeiaBaseEntity, NumberEntity):
     async def async_set_native_value(self, value: float) -> None:
         ivalue = int(value)
         self.set_local_status(self._status_key, str(ivalue))
-        await self.client.async_write_device(self._service, ivalue)
+        await self.async_device_write(self._service, ivalue)

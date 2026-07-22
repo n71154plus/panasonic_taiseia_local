@@ -99,8 +99,26 @@ def async_suggest_name(hass: HomeAssistant | None, mac: str | None) -> Suggested
     return _from_devices_json(mac12)
 
 
+def format_device_title(nickname: str, *, cloud_only: bool = False) -> str:
+    """Human title with path hint: (雲端) or (本地)."""
+    title = (nickname or "").strip()
+    for suffix in (" (本地)", " (雲端)", " (混合)", "(本地)", "(雲端)"):
+        if title.endswith(suffix):
+            title = title[: -len(suffix)].rstrip()
+            break
+    if not title:
+        title = "Panasonic"
+    if cloud_only:
+        return f"{title} (雲端)"
+    return f"{title} (本地)"
+
+
 def format_local_title(nickname: str, type_name: str | None = None) -> str:
-    title = nickname.strip()
-    if not title.endswith("(本地)") and "本地" not in title:
-        title = f"{title} (本地)"
-    return title
+    """Back-compat: LAN / hybrid device title with (本地)."""
+    _ = type_name
+    return format_device_title(nickname, cloud_only=False)
+
+
+def format_cloud_title(nickname: str) -> str:
+    """Cloud-only device title with (雲端)."""
+    return format_device_title(nickname, cloud_only=True)

@@ -18,7 +18,7 @@
       },
       "import_devices": {
         "title": "選擇要匯入的區網設備",
-        "description": "已用官網清單對應區網 MAC；掃不到時會再問官網要模組 IP（UserGetGWIP）並探測埠 57223。UX／PX／RX 等冷氣只要模組有開本地埠即可匯入——找不到通常是網段或未開 57223，不是機型名稱問題。\n\n略過／無法本地控制：\n{skipped}",
+        "description": "從官網 EMS 帳號勾選設備。有區網模組（CZ-T006）且埠 57223 可通時優先本地；無法區網者（例如部分冰箱）會標示「僅雲端」，仍可匯入並以雲端控制。\n\n說明：\n{skipped}",
         "data": {
           "devices": "匯入設備"
         }
@@ -71,7 +71,7 @@
     "step": {
       "init": {
         "title": "Panasonic TaiSEIA 選項",
-        "description": "主設定：帳號、區網連線與耗電週期（全室共用）。設備設定：名稱、ModelType、輪詢與是否計入全室。若尚無主設定，共用項目會顯示於設備選項中。",
+        "description": "主設定：帳號、區網連線與耗電週期（全室共用）。設備設定：名稱、ModelType、輪詢、是否計入全室、控制路徑（混合／本地／雲端）。若尚無主設定，共用項目會顯示於設備選項中。",
         "data": {
           "password": "更新密碼（留空則不變）",
           "refresh_cloud": "重新登入並更新 token",
@@ -90,7 +90,8 @@
           "energy_reset_day": "每月幾號歸零（1–28，僅每月週期）",
           "energy_reset_weekday": "每週星期幾歸零（僅每週週期）",
           "energy_reset_period": "立即重置本期耗電",
-          "energy_reset_total": "立即重置累計耗電"
+          "energy_reset_total": "立即重置累計耗電",
+          "control_mode": "控制路徑（混合＝寫雲端優先／讀本地優先）"
         }
       }
     }
