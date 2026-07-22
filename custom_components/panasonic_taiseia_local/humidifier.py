@@ -116,18 +116,18 @@ class TaiSeiaDehumidifier(TaiSeiaBaseEntity, HumidifierEntity):
 
     async def async_turn_on(self, **kwargs) -> None:
         self.set_local_status(STATUS_POWER, "1")
-        await self.client.async_write_device(SVC_POWER, 1)
+        await self.async_device_write(SVC_POWER, 1)
 
     async def async_turn_off(self, **kwargs) -> None:
         self.set_local_status(STATUS_POWER, "0")
-        await self.client.async_write_device(SVC_POWER, 0)
+        await self.async_device_write(SVC_POWER, 0)
 
     async def async_set_mode(self, mode: str) -> None:
         mode_id = _key_from_dict(self._mode_map(), mode)
         if mode_id is None:
             return
         self.set_local_status(STATUS_MODE, str(mode_id))
-        await self.client.async_write_device(SVC_MODE, int(mode_id))
+        await self.async_device_write(SVC_MODE, int(mode_id))
 
     async def async_set_humidity(self, humidity: int) -> None:
         hum_map = self._humidity_map()
@@ -136,4 +136,4 @@ class TaiSeiaDehumidifier(TaiSeiaBaseEntity, HumidifierEntity):
         if key is None:
             return
         self.set_local_status(f"0x{SVC_DH_HUMIDITY_SET:02X}", str(key))
-        await self.client.async_write_device(SVC_DH_HUMIDITY_SET, int(key))
+        await self.async_device_write(SVC_DH_HUMIDITY_SET, int(key))

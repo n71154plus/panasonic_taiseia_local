@@ -7,7 +7,7 @@
   "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/n71154plus/panasonic_taiseia_local",
-  "iot_class": "local_polling",
+  "iot_class": "calculated",
   "issue_tracker": "https://github.com/n71154plus/panasonic_taiseia_local/issues",
   "requirements": [],
   "ssdp": [
@@ -18,5 +18,5 @@
       "deviceType": "urn:schemas-upnp-org:device:airconditonDevice:1"
     }
   ],
-  "version": "1.6.4"
+  "version": "1.7.0"
 }

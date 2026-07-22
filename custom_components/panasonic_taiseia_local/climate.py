@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from homeassistant.components.climate import (
     ClimateEntity,
@@ -60,7 +61,6 @@ async def async_setup_entry(hass, entry, async_add_entities) -> bool:
     client = hass.data[DOMAIN][entry.entry_id][DATA_CLIENT]
     coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
     profile = hass.data[DOMAIN][entry.entry_id].get(DATA_PROFILE)
-    # DeviceType 1 (AC) from catalog, or TaiSEIA type AC
     if client.device.sa_type_id != TYPE_AC and not (profile and profile.device_type == 1):
         return True
     async_add_entities(
@@ -92,7 +92,6 @@ class TaiSeiaClimate(TaiSeiaBaseEntity, ClimateEntity):
 
     @property
     def icon(self) -> str:
-        # Prefer AC icon over HA climate domain thermostat dial.
         return ICON_CLIMATE
 
     @property
@@ -154,21 +153,29 @@ class TaiSeiaClimate(TaiSeiaBaseEntity, ClimateEntity):
         modes.append(HVACMode.OFF)
         return modes
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        data = self.coordinator.data or {}
+        return {
+            "control_mode": data.get("control_mode"),
+            "control_path": data.get("control_path"),
+        }
+
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         _LOGGER.debug("[%s] set_hvac_mode %s", self.label, hvac_mode)
         if hvac_mode == HVACMode.OFF:
             self.set_local_status(STATUS_POWER, "0")
-            await self.client.async_write_ac(SVC_POWER, 0)
+            await self.async_device_write(SVC_POWER, 0)
             return
 
         mapping = next(m for m in self._mode_table() if m["key"] == hvac_mode)
         mode = mapping["mappingCode"]
         was_off = not self.status_bool(STATUS_POWER)
         self.set_local_status(STATUS_MODE, str(mode))
-        await self.client.async_write_ac(SVC_MODE, mode)
+        await self.async_device_write(SVC_MODE, mode)
         if was_off:
             self.set_local_status(STATUS_POWER, "1")
-            await self.client.async_write_ac(SVC_POWER, 1)
+            await self.async_device_write(SVC_POWER, 1)
 
     @property
     def fan_mode(self) -> str:
@@ -183,7 +190,7 @@ class TaiSeiaClimate(TaiSeiaBaseEntity, ClimateEntity):
     async def async_set_fan_mode(self, fan_mode: str) -> None:
         mode_id = int(_key_from_dict(self._fan_map(), fan_mode))
         self.set_local_status(STATUS_FAN, str(mode_id))
-        await self.client.async_write_ac(SVC_FAN, mode_id)
+        await self.async_device_write(SVC_FAN, mode_id)
 
     @property
     def swing_mode(self) -> str:
@@ -198,7 +205,7 @@ class TaiSeiaClimate(TaiSeiaBaseEntity, ClimateEntity):
     async def async_set_swing_mode(self, swing_mode: str) -> None:
         mode_id = int(_key_from_dict(self._swing_map(), swing_mode))
         self.set_local_status(STATUS_SWING, str(mode_id))
-        await self.client.async_write_ac(SVC_SWING, mode_id)
+        await self.async_device_write(SVC_SWING, mode_id)
 
     @property
     def target_temperature(self) -> float:
@@ -214,7 +221,7 @@ class TaiSeiaClimate(TaiSeiaBaseEntity, ClimateEntity):
             return
         value = int(target)
         self.set_local_status(STATUS_TEMP_SET, str(value))
-        await self.client.async_write_ac(SVC_TEMP_SET, value)
+        await self.async_device_write(SVC_TEMP_SET, value)
 
     @property
     def min_temp(self) -> float:

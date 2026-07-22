@@ -68,6 +68,18 @@ CONF_ENERGY_RESET_WEEKDAY = "energy_reset_weekday"
 CONF_ENERGY_RESET_PERIOD = "energy_reset_period"
 CONF_ENERGY_RESET_TOTAL = "energy_reset_total"
 
+# Per-device control path (hybrid = cloud-first write, LAN-first read)
+CONF_CONTROL_MODE = "control_mode"
+CONTROL_MODE_HYBRID = "hybrid"
+CONTROL_MODE_LOCAL = "local"
+CONTROL_MODE_CLOUD = "cloud"
+DEFAULT_CONTROL_MODE = CONTROL_MODE_HYBRID
+CONTROL_MODE_OPTIONS = {
+    CONTROL_MODE_HYBRID: "混合（寫雲端優先／讀本地優先）",
+    CONTROL_MODE_LOCAL: "僅本地",
+    CONTROL_MODE_CLOUD: "僅雲端",
+}
+
 # Cloud metadata cached on device entries (from EMS)
 CONF_CLOUD_NICKNAME = "cloud_nickname"
 CONF_CLOUD_MODEL = "cloud_model"
@@ -75,6 +87,16 @@ CONF_CLOUD_MODEL_ID = "cloud_model_id"
 CONF_CLOUD_MODEL_TYPE = "cloud_model_type"
 CONF_CLOUD_DEVICE_TYPE = "cloud_device_type"
 CONF_CLOUD_GWID = "cloud_gwid"
+CONF_CLOUD_AUTH = "cloud_auth"
+
+# Shared EMS transport (hub-level gate; not per-request sleep)
+DEFAULT_EMS_MIN_INTERVAL = 1.5
+DEFAULT_EMS_TIMEOUT = 30.0
+DEFAULT_EMS_RATE_LIMIT_BACKOFF = 300.0  # seconds after HTTP 429
+DEFAULT_EMS_WAF_BACKOFF = 900.0  # seconds after WAF/CDN block
+
+DATA_CONTROL = "control"
+DATA_EMS_GATE = "_ems_gate"
 
 ENERGY_CYCLE_MONTHLY = "monthly"
 ENERGY_CYCLE_DAILY = "daily"
@@ -172,6 +194,7 @@ SVC_SWING = 0x0F
 SVC_SWING_LR = 0x11
 SVC_FILTER_NOTIFY = 0x12
 SVC_MOLD = 0x17
+SVC_MOLD_ALT = 0x56  # UX/VX CommandList 乾燥防霉
 SVC_SELF_CLEAN = 0x18
 SVC_MOTION = 0x19
 SVC_TURBO = 0x1A

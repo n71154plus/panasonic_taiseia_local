@@ -27,12 +27,14 @@ from .cloud_sync import (
     cloud_fields_from_device,
 )
 from .const import (
+    CONF_CLOUD_AUTH,
     CONF_CLOUD_DEVICE_TYPE,
     CONF_CLOUD_GWID,
     CONF_CLOUD_MODEL,
     CONF_CLOUD_MODEL_ID,
     CONF_CLOUD_MODEL_TYPE,
     CONF_CLOUD_NICKNAME,
+    CONF_CONTROL_MODE,
     CONF_CP_TOKEN,
     CONF_DEVICE_TYPE,
     CONF_ENERGY_CYCLE,
@@ -54,8 +56,12 @@ from .const import (
     CONF_REQUEST_TIMEOUT,
     CONF_UPDATE_INTERVAL,
     CONF_USERNAME,
+    CONTROL_MODE_CLOUD,
+    CONTROL_MODE_OPTIONS,
     DATA_CLIENT,
+    DATA_COORDINATOR,
     DATA_ENERGY,
+    DEFAULT_CONTROL_MODE,
     DEFAULT_ENERGY_CYCLE,
     DEFAULT_ENERGY_CYCLE_DAYS,
     DEFAULT_ENERGY_RESET_DAY,
@@ -71,6 +77,7 @@ from .const import (
     ENERGY_WEEKDAY_OPTIONS,
     ENTRY_TYPE_DEVICE,
     ENTRY_TYPE_HUB,
+    TYPE_AC,
 )
 from .discovery import DiscoveredDevice, async_discover_devices, async_probe_host
 from .energy import (
@@ -83,7 +90,7 @@ from .lan_settings import (
     async_get_lan_settings,
     async_save_lan_settings,
 )
-from .naming import format_local_title
+from .naming import format_cloud_title, format_local_title
 from .taiseia import TaiSeiaError, configure_lan_concurrency
 
 
@@ -104,18 +111,53 @@ def _hub_entry(hass: HomeAssistant) -> ConfigEntry | None:
     return None
 
 
-def _configured_macs(hass: HomeAssistant) -> set[str]:
+def _configured_ids(hass: HomeAssistant) -> set[str]:
+    """MAC / GWID / unique_id keys already configured as device entries."""
     out: set[str] = set()
     for entry in hass.config_entries.async_entries(DOMAIN):
         if entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_HUB:
             continue
-        uid = (entry.unique_id or "").lower()
-        if len(uid) == 12:
-            out.add(uid)
-        mac = (entry.data.get("mac") or "").lower()
-        if len(mac) == 12:
-            out.add(mac)
+        for raw in (
+            entry.unique_id,
+            entry.data.get("mac"),
+            entry.data.get(CONF_CLOUD_GWID),
+        ):
+            if not raw:
+                continue
+            key = str(raw).lower()
+            if key.startswith("gwid:"):
+                key = key[5:]
+            out.add(key)
+            if len(key) == 12:
+                out.add(key)
     return out
+
+
+def _configured_macs(hass: HomeAssistant) -> set[str]:
+    """Back-compat alias used by discover/manual flows."""
+    return {k for k in _configured_ids(hass) if len(k) == 12}
+
+
+def _ems_to_sa_type(device_type: int) -> int:
+    """EMS DeviceType aligns with TaiSEIA type ids for common appliances."""
+    try:
+        return int(device_type)
+    except (TypeError, ValueError):
+        return TYPE_AC
+
+
+def _cloud_only_import_data(cd: CloudDevice, *, mac: str | None = None) -> dict[str, Any]:
+    sa_type = _ems_to_sa_type(cd.device_type)
+    return {
+        CONF_HOST: "0.0.0.0",
+        CONF_NAME: format_cloud_title(cd.nickname),
+        CONF_INDOOR_MODEL: cd.model or None,
+        CONF_MODEL_TYPE: cd.model_type or None,
+        CONF_DEVICE_TYPE: sa_type,
+        "mac": (mac or cd.mac or "").upper() or None,
+        "cloud_only": True,
+        **cloud_fields_from_device(cd),
+    }
 
 
 class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -260,7 +302,6 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         by_mac = {(d.mac or "").upper(): d for d in found if d.mac}
 
         cloud = await self._async_cloud_client()
-        # Refresh cloud list if we have hub credentials but empty cache
         if not self._cloud_devices and cloud is not None:
             try:
                 self._cloud_devices = await cloud.async_get_devices()
@@ -276,25 +317,53 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except Exception:  # noqa: BLE001
                 self._cloud_devices = []
 
-        configured = _configured_macs(self.hass)
+        configured = _configured_ids(self.hass)
         self._import_candidates = {}
         choices: dict[str, str] = {}
-
-        # Cloud-first (local-capable)
         seen_macs: set[str] = set()
+        seen_gwids: set[str] = set()
+
+        def _add_cloud_only(cd: CloudDevice, *, mac: str | None = None, reason: str) -> None:
+            gwid = (cd.gwid or "").strip()
+            if not gwid or not cd.auth:
+                return
+            gkey = gwid.lower()
+            if gkey in configured or gkey in seen_gwids:
+                return
+            if mac and mac.lower() in configured:
+                return
+            seen_gwids.add(gkey)
+            type_name = DEVICE_TYPE_NAMES.get(
+                _ems_to_sa_type(cd.device_type), str(cd.device_type)
+            )
+            key = f"cloud:{gwid}"
+            label = (
+                f"{cd.nickname} · {cd.model or '?'} · {cd.model_type or '?'} "
+                f"[{type_name} · 僅雲端 · {reason}]"
+            )
+            self._import_candidates[key] = _cloud_only_import_data(cd, mac=mac)
+            choices[key] = label
+
+        # Cloud inventory
         for cd in self._cloud_devices:
-            if not cd.is_local_candidate or not cd.mac:
+            gwid = (cd.gwid or "").strip()
+            if gwid and gwid.lower() in configured:
                 continue
+
+            # Pure cloud devices (fridge etc. — non-MAC GWID)
+            if not cd.is_local_candidate or not cd.mac:
+                _add_cloud_only(cd, reason="無區網模組")
+                continue
+
             mac = cd.mac.upper()
             seen_macs.add(mac)
             if mac.lower() in configured:
                 continue
+
             local = by_mac.get(mac)
             type_name = DEVICE_TYPE_NAMES.get(cd.device_type, str(cd.device_type))
             source = "區網掃描"
 
-            # SSDP /24 often miss modules on other VLANs or wrong Docker subnet —
-            # ask EMS for last-known LAN IP (works for UX / PX / … alike).
             if local is None and cloud is not None:
                 try:
                     gw_ip = await cloud.async_get_gw_ip(cd.gwid)
@@ -303,16 +372,16 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 if gw_ip:
                     probed = await async_probe_host(session, gw_ip)
                     if probed is None:
-                        choices[f"skip:{mac}"] = (
-                            f"{cd.nickname} · {cd.model} · {cd.model_type or '?'} "
-                            f"· {gw_ip} [埠 57223 不通，無法本地控制]"
+                        _add_cloud_only(
+                            cd, mac=mac, reason=f"{gw_ip} 埠不通，可雲端控制"
                         )
                         continue
                     probed_mac = (probed.mac or "").upper()
                     if probed_mac and probed_mac != mac:
-                        choices[f"skip:{mac}"] = (
-                            f"{cd.nickname} · {cd.model} · {cd.model_type or '?'} "
-                            f"· {gw_ip} [官網 IP 對到其他模組 {probed_mac}]"
+                        _add_cloud_only(
+                            cd,
+                            mac=mac,
+                            reason=f"官網 IP 對到其他模組，改雲端",
                         )
                         continue
                     local = probed
@@ -332,21 +401,17 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_MODEL_TYPE: cd.model_type or None,
                     CONF_DEVICE_TYPE: local.sa_type or cd.device_type,
                     "mac": mac,
+                    "cloud_only": False,
                     **cloud_fields_from_device(cd),
                 }
                 choices[mac] = label
             else:
-                choices[f"skip:{mac}"] = (
-                    f"{cd.nickname} · {cd.model} · {cd.model_type or '?'} "
-                    f"[區網未發現：請確認與 HA 同網段、模組有開 TCP 57223，"
-                    f"或改用「手動輸入 IP」]"
-                )
+                _add_cloud_only(cd, mac=mac, reason="區網未發現，可雲端控制")
 
         # LAN devices not in cloud
         for mac, local in by_mac.items():
             if mac in seen_macs or mac.lower() in configured:
                 continue
-            type_name = DEVICE_TYPE_NAMES.get(local.sa_type, "")
             label = f"{local.label} · （官網無對應，僅本地）"
             self._import_candidates[mac] = {
                 CONF_HOST: local.host,
@@ -355,6 +420,7 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_MODEL_TYPE: default_model_type(local.sa_type),
                 CONF_DEVICE_TYPE: local.sa_type,
                 "mac": mac,
+                "cloud_only": False,
             }
             choices[mac] = label
 
@@ -365,8 +431,7 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         self._errors = {}
         choices = await self._async_build_import_candidates()
-        selectable = {k: v for k, v in choices.items() if not k.startswith("skip:")}
-        skipped = [v for k, v in choices.items() if k.startswith("skip:")]
+        selectable = dict(choices)
 
         if user_input is not None:
             selected = user_input.get("devices") or []
@@ -374,7 +439,6 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 selected = [selected]
             selected = [s for s in selected if s in self._import_candidates]
             hub = _hub_entry(self.hass)
-            # First-time cloud setup: allow hub-only (import devices later)
             if not selected and hub is None and self._account:
                 return await self._async_finish_import([])
             if not selected:
@@ -382,7 +446,7 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 return await self._async_finish_import(selected)
 
-        if not selectable and not skipped and not self._account:
+        if not selectable and not self._account:
             self._errors["base"] = "no_devices"
 
         schema_dict: dict[Any, Any] = {}
@@ -396,7 +460,7 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema(schema_dict) if schema_dict else vol.Schema({}),
             errors=self._errors,
             description_placeholders={
-                "skipped": ("\n".join(skipped) if skipped else "無"),
+                "skipped": "無（無法區網者會標「僅雲端」並可勾選匯入）",
             },
         )
 
@@ -406,7 +470,7 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if hub is None:
             self.hass.data.setdefault(DOMAIN, {})
             self.hass.data[DOMAIN]["_pending_imports"] = [
-                self._import_candidates[mac] for mac in selected
+                self._import_candidates[key] for key in selected
             ]
             return self.async_create_entry(
                 title=f"Panasonic TaiSEIA（{self._account}）",
@@ -419,8 +483,8 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 },
             )
 
-        for mac in selected:
-            data = dict(self._import_candidates[mac])
+        for key in selected:
+            data = dict(self._import_candidates[key])
             data[CONF_HUB_ENTRY_ID] = hub.entry_id
             data[CONF_ENTRY_TYPE] = ENTRY_TYPE_DEVICE
             await self.hass.config_entries.flow.async_init(
@@ -432,17 +496,50 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_device_import(self, user_input: dict[str, Any]) -> FlowResult:
         """Create a single device entry (invoked programmatically)."""
-        mac = (user_input.get("mac") or "").upper()
-        host = user_input[CONF_HOST]
-        uid = mac.lower() if mac else host
+        mac = (user_input.get("mac") or "").upper() or None
+        gwid = (user_input.get(CONF_CLOUD_GWID) or "").strip()
+        host = (user_input.get(CONF_HOST) or "0.0.0.0").strip() or "0.0.0.0"
+        cloud_only = bool(user_input.get("cloud_only")) or host in ("", "0.0.0.0")
+        if mac and len(mac) == 12:
+            uid = mac.lower()
+        elif gwid:
+            uid = f"gwid:{gwid.lower()}"
+        else:
+            uid = host
         await self.async_set_unique_id(uid)
-        self._abort_if_unique_id_configured(updates={CONF_HOST: host})
-        title = user_input.get(CONF_NAME) or host
+        updates: dict[str, Any] = {}
+        if host and host not in ("", "0.0.0.0"):
+            updates[CONF_HOST] = host
+        if updates:
+            self._abort_if_unique_id_configured(updates=updates)
+        else:
+            self._abort_if_unique_id_configured()
+        title = user_input.get(CONF_NAME) or gwid or host
         mt = resolve_model_type(
             user_input.get(CONF_MODEL_TYPE),
             int(user_input.get(CONF_DEVICE_TYPE) or 1),
             None,
         )
+        options = {
+            CONF_UPDATE_INTERVAL: DEFAULT_UPDATE_INTERVAL,
+            CONF_ENERGY_ENABLED: True,
+            CONF_ENERGY_INCLUDE_HOUSE: True,
+        }
+        if cloud_only:
+            options[CONF_CONTROL_MODE] = CONTROL_MODE_CLOUD
+        cloud_keys = {
+            k: user_input[k]
+            for k in (
+                CONF_CLOUD_NICKNAME,
+                CONF_CLOUD_MODEL,
+                CONF_CLOUD_MODEL_ID,
+                CONF_CLOUD_MODEL_TYPE,
+                CONF_CLOUD_DEVICE_TYPE,
+                CONF_CLOUD_GWID,
+                CONF_CLOUD_AUTH,
+            )
+            if user_input.get(k) not in (None, "")
+        }
         return self.async_create_entry(
             title=title,
             data={
@@ -454,25 +551,11 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_INDOOR_MODEL: user_input.get(CONF_INDOOR_MODEL),
                 CONF_MODEL_TYPE: mt,
                 CONF_HUB_ENTRY_ID: user_input.get(CONF_HUB_ENTRY_ID),
-                "mac": mac or None,
-                **{
-                    k: user_input[k]
-                    for k in (
-                        CONF_CLOUD_NICKNAME,
-                        CONF_CLOUD_MODEL,
-                        CONF_CLOUD_MODEL_ID,
-                        CONF_CLOUD_MODEL_TYPE,
-                        CONF_CLOUD_DEVICE_TYPE,
-                        CONF_CLOUD_GWID,
-                    )
-                    if user_input.get(k) not in (None, "")
-                },
+                "mac": mac,
+                "cloud_only": cloud_only,
+                **cloud_keys,
             },
-            options={
-                CONF_UPDATE_INTERVAL: DEFAULT_UPDATE_INTERVAL,
-                CONF_ENERGY_ENABLED: True,
-                CONF_ENERGY_INCLUDE_HOUSE: True,
-            },
+            options=options,
         )
 
     # ---- advanced local-only paths (unchanged behaviour) ----
@@ -821,15 +904,44 @@ class DeviceOptionsFlowHandler(config_entries.OptionsFlow):
                 new_data[CONF_NAME] = name
             new_data[CONF_INDOOR_MODEL] = indoor
             new_data[CONF_MODEL_TYPE] = mt
-            new_options = {
-                CONF_UPDATE_INTERVAL: interval,
-                CONF_ENERGY_ENABLED: bool(user_input.get(CONF_ENERGY_ENABLED, True)),
-                CONF_ENERGY_INCLUDE_HOUSE: bool(
-                    user_input.get(CONF_ENERGY_INCLUDE_HOUSE, True)
-                ),
-            }
+            # Preserve existing options; only overwrite keys this form manages.
+            new_options = dict(entry.options)
+            new_options[CONF_UPDATE_INTERVAL] = interval
+            new_options[CONF_ENERGY_ENABLED] = bool(
+                user_input.get(CONF_ENERGY_ENABLED, True)
+            )
+            new_options[CONF_ENERGY_INCLUDE_HOUSE] = bool(
+                user_input.get(CONF_ENERGY_INCLUDE_HOUSE, True)
+            )
             domain = self.hass.data.get(DOMAIN) or {}
             slot = domain.get(entry.entry_id) or {}
+            coord = slot.get(DATA_COORDINATOR)
+            cloud_only = bool(
+                coord and (getattr(coord, "data", None) or {}).get("cloud_only")
+            )
+            host = (entry.data.get(CONF_HOST) or "").strip()
+            if (
+                not cloud_only
+                and entry.data.get(CONF_CLOUD_GWID)
+                and host in ("", "0.0.0.0")
+            ):
+                cloud_only = True
+            if cloud_only:
+                new_options[CONF_CONTROL_MODE] = CONTROL_MODE_CLOUD
+            else:
+                mode = str(
+                    user_input.get(CONF_CONTROL_MODE) or DEFAULT_CONTROL_MODE
+                )
+                if mode not in CONTROL_MODE_OPTIONS:
+                    mode = DEFAULT_CONTROL_MODE
+                new_options[CONF_CONTROL_MODE] = mode
+            for k in (
+                "mold_dry_simulate",
+                "mold_dry_minutes",
+                "mold_dry_air",
+                "mold_dry_fan",
+            ):
+                new_options.pop(k, None)
             tracker = slot.get(DATA_ENERGY)
             if tracker is not None:
                 if user_input.get(CONF_ENERGY_RESET_PERIOD):
@@ -938,6 +1050,30 @@ class DeviceOptionsFlowHandler(config_entries.OptionsFlow):
             vol.Optional(CONF_ENERGY_RESET_PERIOD, default=False): bool,
             vol.Optional(CONF_ENERGY_RESET_TOTAL, default=False): bool,
         }
+        slot = (self.hass.data.get(DOMAIN) or {}).get(entry.entry_id) or {}
+        coord = slot.get(DATA_COORDINATOR)
+        cloud_only = bool(coord and (getattr(coord, "data", None) or {}).get("cloud_only"))
+        if not cloud_only and entry.data.get(CONF_CLOUD_GWID) and entry.data.get(
+            CONF_CLOUD_AUTH
+        ):
+            # LAN host missing / 0.0.0.0 → treat as cloud-capable lock candidate
+            host = (entry.data.get(CONF_HOST) or "").strip()
+            if host in ("", "0.0.0.0"):
+                cloud_only = True
+        if cloud_only:
+            schema[
+                vol.Optional(
+                    CONF_CONTROL_MODE,
+                    default=CONTROL_MODE_CLOUD,
+                )
+            ] = vol.In({CONTROL_MODE_CLOUD: CONTROL_MODE_OPTIONS[CONTROL_MODE_CLOUD]})
+        else:
+            schema[
+                vol.Optional(
+                    CONF_CONTROL_MODE,
+                    default=opts.get(CONF_CONTROL_MODE, DEFAULT_CONTROL_MODE),
+                )
+            ] = vol.In(CONTROL_MODE_OPTIONS)
         if not has_hub:
             schema.update(
                 {

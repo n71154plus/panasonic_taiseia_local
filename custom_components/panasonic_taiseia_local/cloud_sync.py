@@ -13,6 +13,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .cloud import CloudAccount, CloudDevice
 from .const import (
+    CONF_CLOUD_AUTH,
     CONF_CLOUD_DEVICE_TYPE,
     CONF_CLOUD_GWID,
     CONF_CLOUD_MODEL,
@@ -31,7 +32,7 @@ from .const import (
     ENTRY_TYPE_HUB,
     MANUFACTURER,
 )
-from .naming import format_local_title, looks_like_module_model
+from .naming import format_cloud_title, format_local_title, looks_like_module_model
 
 _LOGGER = logging.getLogger(__package__)
 
@@ -44,6 +45,7 @@ def cloud_fields_from_device(cd: CloudDevice) -> dict[str, Any]:
         CONF_CLOUD_MODEL_TYPE: cd.model_type or None,
         CONF_CLOUD_DEVICE_TYPE: cd.device_type,
         CONF_CLOUD_GWID: cd.gwid or None,
+        CONF_CLOUD_AUTH: cd.auth or None,
     }
 
 
@@ -58,8 +60,23 @@ def merge_cloud_into_entry_data(
     if cd.model_type and not out.get(CONF_MODEL_TYPE):
         out[CONF_MODEL_TYPE] = cd.model_type
     if update_name and cd.nickname:
-        if looks_like_module_model(out.get(CONF_NAME)) or not out.get(CONF_NAME):
-            out[CONF_NAME] = format_local_title(cd.nickname)
+        cloud_only = bool(out.get("cloud_only")) or (
+            str(out.get("host") or "") in ("", "0.0.0.0")
+            and bool(out.get(CONF_CLOUD_GWID))
+        )
+        # Refresh path suffix when nickname looks like module model or wrong path tag
+        current = out.get(CONF_NAME) or ""
+        wrong_local = cloud_only and "(本地)" in str(current)
+        if (
+            looks_like_module_model(current)
+            or not current
+            or wrong_local
+        ):
+            out[CONF_NAME] = (
+                format_cloud_title(cd.nickname)
+                if cloud_only
+                else format_local_title(cd.nickname)
+            )
     return out
 
 
@@ -124,6 +141,7 @@ async def async_sync_cloud_to_devices(
         for cd in devices
         if cd.mac and cd.is_local_candidate
     }
+    by_gwid = {(cd.gwid or "").lower(): cd for cd in devices if cd.gwid}
     updated = 0
     registry = dr.async_get(hass)
 
@@ -132,10 +150,18 @@ async def async_sync_cloud_to_devices(
             continue
         if entry.data.get(CONF_ENTRY_TYPE) not in (ENTRY_TYPE_DEVICE, None):
             continue
+        cd = None
         mac = _mac_key(entry.data.get("mac") or entry.unique_id)
-        if not mac or mac not in by_mac:
+        if mac and mac in by_mac:
+            cd = by_mac[mac]
+        if cd is None:
+            gwid = (entry.data.get(CONF_CLOUD_GWID) or "").lower()
+            if not gwid and (entry.unique_id or "").startswith("gwid:"):
+                gwid = (entry.unique_id or "")[5:].lower()
+            if gwid and gwid in by_gwid:
+                cd = by_gwid[gwid]
+        if cd is None:
             continue
-        cd = by_mac[mac]
         new_data = merge_cloud_into_entry_data(dict(entry.data), cd)
         title = new_data.get(CONF_NAME) or entry.title
         if new_data != dict(entry.data) or title != entry.title:
@@ -145,15 +171,25 @@ async def async_sync_cloud_to_devices(
             updated += 1
 
         # Refresh device registry model / name from cloud
-        device = registry.async_get_device({(DOMAIN, mac)})
-        if device is None and entry.unique_id:
-            device = registry.async_get_device({(DOMAIN, entry.unique_id)})
+        identifiers = set()
+        if mac:
+            identifiers.add((DOMAIN, mac))
+        if entry.unique_id:
+            identifiers.add((DOMAIN, entry.unique_id))
+        gwid_id = (cd.gwid or "").lower()
+        if gwid_id:
+            identifiers.add((DOMAIN, f"gwid:{gwid_id}"))
+        device = None
+        for ident in identifiers:
+            device = registry.async_get_device({ident})
+            if device is not None:
+                break
         if device is not None:
             registry.async_update_device(
                 device.id,
                 name=title,
                 model=_device_model_string(new_data, cd),
-                serial_number=(cd.gwid or mac).upper(),
+                serial_number=(cd.gwid or mac or "").upper() or None,
             )
 
     _LOGGER.info("Synced cloud metadata to %s local device(s)", updated)
@@ -177,6 +213,7 @@ def cloud_attrs_from_entry(entry: ConfigEntry | dict) -> dict[str, Any]:
         "官網 ModelID": CONF_CLOUD_MODEL_ID,
         "官網 ModelType": CONF_CLOUD_MODEL_TYPE,
         "官網 GWID": CONF_CLOUD_GWID,
+        "官網 Auth": CONF_CLOUD_AUTH,
     }
     for label, key in mapping.items():
         val = data.get(key)

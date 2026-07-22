@@ -101,6 +101,6 @@ class TaiSeiaSwitch(TaiSeiaBaseEntity, SwitchEntity):
             value = 1 if turn_on else 0
         self.set_local_status(self._status_key, str(value))
         try:
-            await self.client.async_write_device(self._service, value)
+            await self.async_device_write(self._service, value)
         except Exception as err:  # noqa: BLE001
             raise HomeAssistantError(str(err)) from err
