@@ -110,6 +110,61 @@ Copy `custom_components/panasonic_taiseia_local` into your HA `custom_components
 
 Entries keep IP but identity is **MAC** (or `gwid:…` for cloud-only). On LAN failure the integration can rediscover by MAC (see v1.6.1+). Prefer DHCP reservation.
 
+## Lovelace: Universal Device Card (recommended)
+
+AC and dehumidifier devices expose many entities on one HA device (setpoint, swing, eco, power, switches, …). The stock thermostat card is awkward for that. Pair this integration with [Universal Device Card](https://github.com/n71154plus/universal-device-card): everyday controls stay on the main card; tap the top-right button for a **same-device popup** with the rest.
+
+### Install the card
+
+**HACS (recommended)**
+
+1. HACS → **Frontend** → **Custom repositories**
+2. Add `https://github.com/n71154plus/universal-device-card` as **Dashboard**
+3. Install, reload the frontend (resource is usually `/hacsfiles/universal-device-card/universal-device-card.js`)
+
+**Manual**
+
+1. Download `dist/` from the latest [Release](https://github.com/n71154plus/universal-device-card/releases) (`universal-device-card.js` + `translations/`)
+2. Place under `config/www/universal-device-card/`
+3. Add a Lovelace resource (JavaScript Module):
+
+```text
+/local/universal-device-card/universal-device-card.js
+```
+
+### Example
+
+Replace `climate.livingroom` with your entity ID:
+
+```yaml
+type: custom:universal-device-card
+entity: climate.livingroom
+layout: standard          # standard | mini | bar
+language: en              # auto | en | zh-TW | zh-CN | ja
+disable_popup: false      # false = top-right opens same-device popup
+```
+
+Compact row:
+
+```yaml
+type: custom:universal-device-card
+entity: climate.bedroom
+layout: mini
+language: en
+```
+
+Optional popup filters (e.g. sensors + controls only):
+
+```yaml
+type: custom:universal-device-card
+entity: climate.livingroom
+language: en
+include_domains: sensor,switch,select,number
+include_sensor_classes: temperature,humidity,power
+```
+
+See the card README for full options. This integration’s climate / humidifier entities and their sibling switches, selects, numbers, and sensors work out of the box.
+
 ## Diagnostics
 
 Download diagnostics from the config entry, or use developer services `probe_device` / `read_service` / `write_service` / `scan_lan`.
