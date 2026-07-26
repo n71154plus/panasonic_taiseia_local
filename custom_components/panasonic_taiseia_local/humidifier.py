@@ -9,6 +9,7 @@ from homeassistant.components.humidifier import (
     HumidifierEntity,
     HumidifierEntityFeature,
 )
+from homeassistant.exceptions import HomeAssistantError
 
 from .capability import filter_option_map
 from .catalog import dehumidifier_humidity_map, dehumidifier_mode_map
@@ -32,6 +33,8 @@ from .const import (
 from .entity import TaiSeiaBaseEntity
 
 _LOGGER = logging.getLogger(__package__)
+
+PARALLEL_UPDATES = 1
 
 
 def _key_from_dict(target: dict, mode_name: str):
@@ -67,7 +70,7 @@ class TaiSeiaDehumidifier(TaiSeiaBaseEntity, HumidifierEntity):
 
     @property
     def label(self) -> str:
-        return f"{self.nickname} {LABEL_DEHUMIDIFIER}".strip()
+        return LABEL_DEHUMIDIFIER
 
     @property
     def available(self) -> bool:
@@ -115,19 +118,30 @@ class TaiSeiaDehumidifier(TaiSeiaBaseEntity, HumidifierEntity):
         return max(vals) if vals else DEHUMIDIFIER_MAX_HUMD
 
     async def async_turn_on(self, **kwargs) -> None:
-        self.set_local_status(STATUS_POWER, "1")
-        await self.async_device_write(SVC_POWER, 1)
+        prev = self.device_status.get(STATUS_POWER)
+        try:
+            await self.async_write_with_rollback(SVC_POWER, 1, STATUS_POWER, prev)
+        except Exception as err:  # noqa: BLE001
+            raise HomeAssistantError(str(err)) from err
 
     async def async_turn_off(self, **kwargs) -> None:
-        self.set_local_status(STATUS_POWER, "0")
-        await self.async_device_write(SVC_POWER, 0)
+        prev = self.device_status.get(STATUS_POWER)
+        try:
+            await self.async_write_with_rollback(SVC_POWER, 0, STATUS_POWER, prev)
+        except Exception as err:  # noqa: BLE001
+            raise HomeAssistantError(str(err)) from err
 
     async def async_set_mode(self, mode: str) -> None:
         mode_id = _key_from_dict(self._mode_map(), mode)
         if mode_id is None:
             return
-        self.set_local_status(STATUS_MODE, str(mode_id))
-        await self.async_device_write(SVC_MODE, int(mode_id))
+        prev = self.device_status.get(STATUS_MODE)
+        try:
+            await self.async_write_with_rollback(
+                SVC_MODE, int(mode_id), STATUS_MODE, prev
+            )
+        except Exception as err:  # noqa: BLE001
+            raise HomeAssistantError(str(err)) from err
 
     async def async_set_humidity(self, humidity: int) -> None:
         hum_map = self._humidity_map()
@@ -135,5 +149,11 @@ class TaiSeiaDehumidifier(TaiSeiaBaseEntity, HumidifierEntity):
         key = _key_from_dict(hum_map, target)
         if key is None:
             return
-        self.set_local_status(f"0x{SVC_DH_HUMIDITY_SET:02X}", str(key))
-        await self.async_device_write(SVC_DH_HUMIDITY_SET, int(key))
+        sk = f"0x{SVC_DH_HUMIDITY_SET:02X}"
+        prev = self.device_status.get(sk)
+        try:
+            await self.async_write_with_rollback(
+                SVC_DH_HUMIDITY_SET, int(key), sk, prev
+            )
+        except Exception as err:  # noqa: BLE001
+            raise HomeAssistantError(str(err)) from err

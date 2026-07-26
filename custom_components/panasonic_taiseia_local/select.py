@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 
 from homeassistant.components.select import SelectEntity
+from homeassistant.const import EntityCategory
+from homeassistant.exceptions import HomeAssistantError
 
 from .capability import filter_option_map, supported_values
 from .catalog import iter_kind, service_allowed
@@ -19,6 +21,8 @@ from .const import (
 from .entity import TaiSeiaBaseEntity
 
 _LOGGER = logging.getLogger(__package__)
+
+PARALLEL_UPDATES = 1
 
 
 async def async_setup_entry(hass, entry, async_add_entities) -> bool:
@@ -49,6 +53,8 @@ async def async_setup_entry(hass, entry, async_add_entities) -> bool:
 
 
 class TaiSeiaSelect(TaiSeiaBaseEntity, SelectEntity):
+    _attr_entity_category = EntityCategory.CONFIG
+
     def __init__(
         self,
         coordinator,
@@ -85,7 +91,7 @@ class TaiSeiaSelect(TaiSeiaBaseEntity, SelectEntity):
 
     @property
     def label(self) -> str:
-        return f"{self.nickname} {self._select_label}"
+        return self._select_label
 
     @property
     def icon(self) -> str:
@@ -119,5 +125,10 @@ class TaiSeiaSelect(TaiSeiaBaseEntity, SelectEntity):
         if value is None:
             return
         store = value if value >= 0 else (value + 256)
-        self.set_local_status(self._status_key, str(store))
-        await self.async_device_write(self._service, store & 0xFFFF)
+        prev = self.device_status.get(self._status_key)
+        try:
+            await self.async_write_with_rollback(
+                self._service, store & 0xFFFF, self._status_key, prev
+            )
+        except Exception as err:  # noqa: BLE001
+            raise HomeAssistantError(str(err)) from err

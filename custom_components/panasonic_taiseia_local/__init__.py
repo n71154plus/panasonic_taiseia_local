@@ -14,7 +14,14 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .catalog import build_generic_profile, build_profile, merge_hidden_device_services, resolve_model_type
+from .catalog import (
+    build_generic_profile,
+    build_profile,
+    load_catalog,
+    merge_hidden_device_services,
+    model_type_matches_device,
+    resolve_model_type,
+)
 from .cloud_sync import async_ensure_hub_device, async_sync_cloud_to_devices
 from .const import (
     CONF_CLOUD_AUTH,
@@ -60,6 +67,12 @@ from .energy import (
     async_load_tracker,
     async_save_tracker,
     period_label,
+)
+from .entry_helpers import (
+    async_update_entry_data,
+    clear_options_snapshot,
+    options_changed_since_seed,
+    seed_options_snapshot,
 )
 from .lan_settings import async_get_lan_settings
 from .naming import async_suggest_name, format_cloud_title, format_local_title, looks_like_module_model
@@ -127,6 +140,7 @@ async def _async_setup_hub(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.async_create_task(async_sync_cloud_to_devices(hass, entry))
 
     await hass.config_entries.async_forward_entry_setups(entry, HUB_PLATFORMS)
+    seed_options_snapshot(hass, entry)
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
     return True
 
@@ -168,7 +182,7 @@ async def _async_rebinding_host(
     new_data[CONF_HOST] = found.host
     if found.mac:
         new_data["mac"] = found.mac.upper()
-    hass.config_entries.async_update_entry(entry, data=new_data)
+    async_update_entry_data(hass, entry, data=new_data)
     return found.host
 
 
@@ -327,6 +341,25 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 new_title = nice
                 changed = True
 
+    # Heal entries poisoned by a wrong-type ModelType (e.g. a washing machine
+    # whose cloud ModelType collided with a dehumidifier catalog code and was
+    # persisted by older versions).
+    stored_mt = new_data.get(CONF_MODEL_TYPE)
+    if (
+        stored_mt
+        and stored_mt in load_catalog()
+        and not model_type_matches_device(stored_mt, client.device.sa_type_id)
+    ):
+        _LOGGER.warning(
+            "TaiSEIA %s dropping ModelType %s: catalog DeviceType mismatches "
+            "device SA type 0x%02X",
+            host,
+            stored_mt,
+            client.device.sa_type_id,
+        )
+        new_data.pop(CONF_MODEL_TYPE, None)
+        changed = True
+
     model_type = resolve_model_type(
         new_data.get(CONF_MODEL_TYPE) or entry.options.get(CONF_MODEL_TYPE),
         client.device.sa_type_id,
@@ -374,7 +407,7 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     if changed:
-        hass.config_entries.async_update_entry(entry, data=new_data, title=new_title)
+        async_update_entry_data(hass, entry, data=new_data, title=new_title)
 
     energy_settings = await async_get_energy_settings(hass)
     energy_tracker = await async_load_tracker(hass, entry.entry_id, energy_settings)
@@ -457,6 +490,7 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         try:
             power_w = None
+            # Cached settings (refreshed on options reload / hub save)
             settings = await async_get_energy_settings(hass)
             energy_tracker.apply_settings(settings)
             if has_power and energy_enabled:
@@ -467,6 +501,7 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     except (TypeError, ValueError):
                         power_w = None
                 energy_tracker.update(power_w)
+                # Persist only when kWh changed, or throttle timestamp meta
                 await async_save_tracker(hass, entry_id, energy_tracker)
             live = hass.config_entries.async_get_entry(entry_id)
             live_data = live.data if live else new_data
@@ -550,25 +585,44 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    seed_options_snapshot(hass, entry)
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    # Flush energy tracker so last_ts survives restart even if not dirty-kWh
+    slot = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if isinstance(slot, dict):
+        tracker = slot.get(DATA_ENERGY)
+        if tracker is not None:
+            try:
+                await async_save_tracker(hass, entry.entry_id, tracker, force=True)
+            except Exception:  # noqa: BLE001
+                pass
     if _is_hub(entry):
         unload_ok = await hass.config_entries.async_unload_platforms(
             entry, HUB_PLATFORMS
         )
         if unload_ok:
             hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+            clear_options_snapshot(hass, entry.entry_id)
         return unload_ok
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id, None)
+        clear_options_snapshot(hass, entry.entry_id)
     return unload_ok
 
 
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload only when options change (not host/token/cloud metadata)."""
+    if not options_changed_since_seed(hass, entry):
+        _LOGGER.debug(
+            "Skip reload for %s (entry data/title changed, options unchanged)",
+            entry.entry_id,
+        )
+        return
     await hass.config_entries.async_reload(entry.entry_id)
 
 

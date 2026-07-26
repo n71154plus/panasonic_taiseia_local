@@ -122,7 +122,9 @@ async def async_fetch_cloud_devices(
     new_data = dict(hub.data)
     new_data[CONF_CP_TOKEN] = cloud.cp_token
     new_data[CONF_REFRESH_TOKEN] = cloud.refresh_token
-    hass.config_entries.async_update_entry(hub, data=new_data)
+    from .entry_helpers import async_update_entry_data
+
+    async_update_entry_data(hass, hub, data=new_data)
     return devices
 
 
@@ -165,9 +167,9 @@ async def async_sync_cloud_to_devices(
         new_data = merge_cloud_into_entry_data(dict(entry.data), cd)
         title = new_data.get(CONF_NAME) or entry.title
         if new_data != dict(entry.data) or title != entry.title:
-            hass.config_entries.async_update_entry(
-                entry, data=new_data, title=title
-            )
+            from .entry_helpers import async_update_entry_data
+
+            async_update_entry_data(hass, entry, data=new_data, title=title)
             updated += 1
 
         # Refresh device registry model / name from cloud
@@ -213,7 +215,7 @@ def cloud_attrs_from_entry(entry: ConfigEntry | dict) -> dict[str, Any]:
         "官網 ModelID": CONF_CLOUD_MODEL_ID,
         "官網 ModelType": CONF_CLOUD_MODEL_TYPE,
         "官網 GWID": CONF_CLOUD_GWID,
-        "官網 Auth": CONF_CLOUD_AUTH,
+        # Never expose cloud_auth on entity attributes
     }
     for label, key in mapping.items():
         val = data.get(key)

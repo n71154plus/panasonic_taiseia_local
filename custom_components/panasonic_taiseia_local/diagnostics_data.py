@@ -8,6 +8,7 @@ from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
 
 from .const import (
+    CONF_CLOUD_AUTH,
     CONF_CP_TOKEN,
     CONF_ENTRY_TYPE,
     CONF_HUB_ENTRY_ID,
@@ -38,10 +39,13 @@ _REDACT_KEYS = {
     CONF_PASSWORD,
     CONF_CP_TOKEN,
     CONF_REFRESH_TOKEN,
+    CONF_CLOUD_AUTH,
     "password",
     "cp_token",
     "refresh_token",
     "token",
+    "cloud_auth",
+    "auth",
 }
 
 

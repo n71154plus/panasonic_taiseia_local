@@ -11,6 +11,7 @@ from homeassistant.components.climate import (
     HVACMode,
 )
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
+from homeassistant.exceptions import HomeAssistantError
 
 from .capability import filter_option_map, supported_values
 from .catalog import (
@@ -48,6 +49,8 @@ from .const import (
 from .entity import TaiSeiaBaseEntity
 
 _LOGGER = logging.getLogger(__package__)
+
+PARALLEL_UPDATES = 1
 
 
 def _key_from_dict(target: dict, mode_name: str):
@@ -88,7 +91,7 @@ class TaiSeiaClimate(TaiSeiaBaseEntity, ClimateEntity):
 
     @property
     def label(self) -> str:
-        return f"{self.nickname} {LABEL_CLIMATE}".strip()
+        return LABEL_CLIMATE
 
     @property
     def icon(self) -> str:
@@ -163,19 +166,40 @@ class TaiSeiaClimate(TaiSeiaBaseEntity, ClimateEntity):
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         _LOGGER.debug("[%s] set_hvac_mode %s", self.label, hvac_mode)
-        if hvac_mode == HVACMode.OFF:
-            self.set_local_status(STATUS_POWER, "0")
-            await self.async_device_write(SVC_POWER, 0)
-            return
+        try:
+            if hvac_mode == HVACMode.OFF:
+                prev = self.device_status.get(STATUS_POWER)
+                await self.async_write_with_rollback(SVC_POWER, 0, STATUS_POWER, prev)
+                return
 
-        mapping = next(m for m in self._mode_table() if m["key"] == hvac_mode)
-        mode = mapping["mappingCode"]
-        was_off = not self.status_bool(STATUS_POWER)
-        self.set_local_status(STATUS_MODE, str(mode))
-        await self.async_device_write(SVC_MODE, mode)
-        if was_off:
-            self.set_local_status(STATUS_POWER, "1")
-            await self.async_device_write(SVC_POWER, 1)
+            mapping = next(m for m in self._mode_table() if m["key"] == hvac_mode)
+            mode = mapping["mappingCode"]
+            was_off = not self.status_bool(STATUS_POWER)
+            prev_mode = self.device_status.get(STATUS_MODE)
+            await self.async_write_with_rollback(SVC_MODE, mode, STATUS_MODE, prev_mode)
+            if was_off:
+                prev_pwr = self.device_status.get(STATUS_POWER)
+                try:
+                    await self.async_write_with_rollback(
+                        SVC_POWER, 1, STATUS_POWER, prev_pwr
+                    )
+                except Exception:
+                    # Mode already applied; restore previous mode if power-on fails
+                    try:
+                        if prev_mode not in (None, ""):
+                            await self.async_write_with_rollback(
+                                SVC_MODE,
+                                int(prev_mode),
+                                STATUS_MODE,
+                                str(mode),
+                            )
+                        else:
+                            self.set_local_status(STATUS_MODE, prev_mode)
+                    except Exception:  # noqa: BLE001
+                        self.set_local_status(STATUS_MODE, prev_mode)
+                    raise
+        except Exception as err:  # noqa: BLE001
+            raise HomeAssistantError(str(err)) from err
 
     @property
     def fan_mode(self) -> str:
@@ -189,8 +213,11 @@ class TaiSeiaClimate(TaiSeiaBaseEntity, ClimateEntity):
 
     async def async_set_fan_mode(self, fan_mode: str) -> None:
         mode_id = int(_key_from_dict(self._fan_map(), fan_mode))
-        self.set_local_status(STATUS_FAN, str(mode_id))
-        await self.async_device_write(SVC_FAN, mode_id)
+        prev = self.device_status.get(STATUS_FAN)
+        try:
+            await self.async_write_with_rollback(SVC_FAN, mode_id, STATUS_FAN, prev)
+        except Exception as err:  # noqa: BLE001
+            raise HomeAssistantError(str(err)) from err
 
     @property
     def swing_mode(self) -> str:
@@ -204,8 +231,11 @@ class TaiSeiaClimate(TaiSeiaBaseEntity, ClimateEntity):
 
     async def async_set_swing_mode(self, swing_mode: str) -> None:
         mode_id = int(_key_from_dict(self._swing_map(), swing_mode))
-        self.set_local_status(STATUS_SWING, str(mode_id))
-        await self.async_device_write(SVC_SWING, mode_id)
+        prev = self.device_status.get(STATUS_SWING)
+        try:
+            await self.async_write_with_rollback(SVC_SWING, mode_id, STATUS_SWING, prev)
+        except Exception as err:  # noqa: BLE001
+            raise HomeAssistantError(str(err)) from err
 
     @property
     def target_temperature(self) -> float:
@@ -220,8 +250,13 @@ class TaiSeiaClimate(TaiSeiaBaseEntity, ClimateEntity):
         if target is None:
             return
         value = int(target)
-        self.set_local_status(STATUS_TEMP_SET, str(value))
-        await self.async_device_write(SVC_TEMP_SET, value)
+        prev = self.device_status.get(STATUS_TEMP_SET)
+        try:
+            await self.async_write_with_rollback(
+                SVC_TEMP_SET, value, STATUS_TEMP_SET, prev
+            )
+        except Exception as err:  # noqa: BLE001
+            raise HomeAssistantError(str(err)) from err
 
     @property
     def min_temp(self) -> float:

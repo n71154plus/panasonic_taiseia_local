@@ -78,13 +78,16 @@ class DiagnosticsDataTest(unittest.TestCase):
                 "username": "user@example.com",
                 "password": "secret",
                 "cp_token": "tok",
+                "cloud_auth": "device-auth",
                 "host": "192.168.0.10",
             }
         )
         self.assertEqual(redacted["password"], "**REDACTED**")
         self.assertEqual(redacted["cp_token"], "**REDACTED**")
+        self.assertEqual(redacted["cloud_auth"], "**REDACTED**")
         self.assertEqual(redacted["host"], "192.168.0.10")
         self.assertNotIn("secret", str(redacted.values()))
+        self.assertNotIn("device-auth", str(redacted.values()))
 
     def test_snapshot_and_probe_attrs(self) -> None:
         entry = SimpleNamespace(

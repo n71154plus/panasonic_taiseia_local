@@ -115,6 +115,24 @@ async def _port_open(host: str, port: int, timeout: float = 0.4) -> bool:
         return False
 
 
+async def _local_outbound_ip() -> str | None:
+    """Resolve outbound IP off the event loop (UDP connect is sync)."""
+    loop = asyncio.get_running_loop()
+
+    def _sync() -> str | None:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                s.connect(("8.8.8.8", 80))
+                return s.getsockname()[0]
+            finally:
+                s.close()
+        except Exception:  # noqa: BLE001
+            return None
+
+    return await loop.run_in_executor(None, _sync)
+
+
 async def _subnet_hosts(
     hass_host_hint: str | None = None,
     *,
@@ -126,12 +144,10 @@ async def _subnet_hosts(
         if candidate and candidate not in hints:
             hints.append(candidate)
     if not hints:
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            hints.append(s.getsockname()[0])
-            s.close()
-        except Exception:  # noqa: BLE001
+        outbound = await _local_outbound_ip()
+        if outbound:
+            hints.append(outbound)
+        else:
             return []
 
     hosts: list[str] = []
@@ -187,6 +203,13 @@ def _normalize_mac(mac: str | None) -> str | None:
     return cleaned if len(cleaned) == 12 else None
 
 
+def _match_mac(devices: list[DiscoveredDevice], want: str) -> DiscoveredDevice | None:
+    for dev in devices:
+        if _normalize_mac(dev.mac) == want:
+            return dev
+    return None
+
+
 async def async_discover_devices(
     session: aiohttp.ClientSession,
     *,
@@ -218,16 +241,26 @@ async def async_find_host_by_mac(
     include_subnet_scan: bool = True,
     subnet_hints: list[str] | None = None,
 ) -> DiscoveredDevice | None:
-    """Re-locate a module after DHCP gave it a new IP (match by MAC)."""
+    """Re-locate a module after DHCP gave it a new IP (match by MAC).
+
+    SSDP-only first; full /24 scan only if still missing.
+    """
     want = _normalize_mac(mac)
     if not want:
         return None
     found = await async_discover_devices(
         session,
-        include_subnet_scan=include_subnet_scan,
+        include_subnet_scan=False,
         subnet_hints=subnet_hints,
     )
-    for dev in found:
-        if _normalize_mac(dev.mac) == want:
-            return dev
-    return None
+    hit = _match_mac(found, want)
+    if hit is not None:
+        return hit
+    if not include_subnet_scan:
+        return None
+    found = await async_discover_devices(
+        session,
+        include_subnet_scan=True,
+        subnet_hints=subnet_hints,
+    )
+    return _match_mac(found, want)

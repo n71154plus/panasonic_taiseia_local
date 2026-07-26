@@ -10,7 +10,18 @@ from typing import Any, Literal
 
 from homeassistant.components.climate import HVACMode
 
-from .const import TYPE_AC, TYPE_AIR_CLEANER, TYPE_DEHUMIDIFIER, TYPE_REFRIGERATOR
+from .const import (
+    TYPE_AC,
+    TYPE_AIR_CLEANER,
+    TYPE_DEHUMIDIFIER,
+    TYPE_DRYING_MACHINE,
+    TYPE_FULL_HEAT_EXCHANGER,
+    TYPE_LAMP,
+    TYPE_LIVING_SPACE_CONTROLLER,
+    TYPE_REFRIGERATOR,
+    TYPE_WASHING_MACHINE,
+    TYPE_WEIGHT_PLATE,
+)
 
 _LOGGER = logging.getLogger(__package__)
 
@@ -74,6 +85,13 @@ _DEFAULT_MODEL_TYPE = {
     TYPE_DEHUMIDIFIER: "JHW",
     TYPE_REFRIGERATOR: "F657",
     TYPE_AIR_CLEANER: "LHW",
+    # NA-V150/170/190MDH share the HDH CommandList; MDH is the cloud ModelType.
+    TYPE_WASHING_MACHINE: "MDH",
+    TYPE_DRYING_MACHINE: "CN-HP",
+    TYPE_FULL_HEAT_EXCHANGER: "FYZY",
+    TYPE_LAMP: "WTY",
+    TYPE_WEIGHT_PLATE: "PZE1",
+    TYPE_LIVING_SPACE_CONTROLLER: "CSC",
 }
 
 _HVAC_NAME_MAP = {
@@ -593,16 +611,36 @@ def merge_hidden_device_services(
     )
 
 
+def model_type_matches_device(model_type: str | None, sa_type_id: int) -> bool:
+    """True when the catalog ModelType belongs to the given SA device type."""
+    if not model_type:
+        return False
+    info = load_catalog().get(model_type)
+    if not info:
+        return False
+    # Unknown SA type (0) → cannot verify, accept.
+    if not sa_type_id:
+        return True
+    return int(info["DeviceType"]) == int(sa_type_id)
+
+
 def resolve_model_type(
     explicit: str | None,
     sa_type_id: int,
     suggested: str | None = None,
 ) -> str | None:
-    """Pick ModelType: user/option → hint → default for SA type."""
+    """Pick ModelType: user/option → hint → default for SA type.
+
+    Candidates whose catalog DeviceType conflicts with the known SA type are
+    rejected: cloud ModelType strings are not unique across appliance kinds
+    (e.g. a washing-machine code can collide with a dehumidifier code), and
+    applying a wrong-type profile makes the device show up as the wrong
+    appliance.
+    """
     for candidate in (explicit, suggested, default_model_type(sa_type_id)):
         if not candidate:
             continue
-        if candidate in load_catalog():
+        if model_type_matches_device(candidate, sa_type_id):
             return candidate
     return None
 

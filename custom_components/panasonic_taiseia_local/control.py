@@ -36,7 +36,8 @@ from .const import (
     ENTRY_TYPE_HUB,
 )
 from .ems_transport import EmsGate, EmsSettings, RequestPriority
-from .taiseia import TaiSeiaClient, status_key
+from .entry_helpers import async_update_entry_data
+from .taiseia import TaiSeiaClient
 
 _LOGGER = logging.getLogger(__package__)
 
@@ -126,7 +127,7 @@ async def async_refresh_cloud_auth(
             new_hub[CONF_CP_TOKEN] = cloud.cp_token
         if cloud.refresh_token:
             new_hub[CONF_REFRESH_TOKEN] = cloud.refresh_token
-        hass.config_entries.async_update_entry(hub, data=new_hub)
+        async_update_entry_data(hass, hub, data=new_hub)
 
     match = None
     if gwid:
@@ -140,7 +141,7 @@ async def async_refresh_cloud_auth(
     new_data = dict(entry.data)
     new_data[CONF_CLOUD_GWID] = match.gwid
     new_data[CONF_CLOUD_AUTH] = match.auth
-    hass.config_entries.async_update_entry(entry, data=new_data)
+    async_update_entry_data(hass, entry, data=new_data)
     return match.gwid, match.auth
 
 
@@ -157,6 +158,7 @@ class DeviceControl:
         lan_ok: bool = True,
     ) -> None:
         self.hass = hass
+        self.entry_id = entry.entry_id
         self.entry = entry
         self.client = client
         self.cloud_only = cloud_only
@@ -164,21 +166,23 @@ class DeviceControl:
         self.last_path: str | None = None
         self._cloud: CloudAccount | None = None
 
+    def _live_entry(self) -> ConfigEntry:
+        return self.hass.config_entries.async_get_entry(self.entry_id) or self.entry
+
     @property
     def mode(self) -> str:
-        live = self.hass.config_entries.async_get_entry(self.entry.entry_id) or self.entry
-        return resolve_control_mode(live, cloud_only=self.cloud_only)
+        return resolve_control_mode(self._live_entry(), cloud_only=self.cloud_only)
 
     def can_use_lan(self) -> bool:
         return self.lan_ok and not self.cloud_only and bool(self.client.host)
 
     def can_use_cloud(self) -> bool:
-        live = self.hass.config_entries.async_get_entry(self.entry.entry_id) or self.entry
+        live = self._live_entry()
         return entry_has_cloud_creds(live) or bool(live.data.get(CONF_CLOUD_GWID))
 
     async def _cloud_account(self) -> CloudAccount | None:
         if self._cloud is None:
-            self._cloud = await async_get_cloud_account(self.hass, self.entry)
+            self._cloud = await async_get_cloud_account(self.hass, self._live_entry())
         return self._cloud
 
     async def async_write(self, service: int, value: int) -> str:
@@ -187,7 +191,8 @@ class DeviceControl:
         errors: list[str] = []
 
         async def _cloud() -> None:
-            creds = await async_refresh_cloud_auth(self.hass, self.entry)
+            live = self._live_entry()
+            creds = await async_refresh_cloud_auth(self.hass, live)
             if not creds:
                 raise CloudApiError("missing cloud GWID/Auth")
             gwid, auth = creds
@@ -202,7 +207,7 @@ class DeviceControl:
                 priority=RequestPriority.USER,
             )
             # Persist refreshed tokens
-            hub = _hub_entry(self.hass, self.entry)
+            hub = _hub_entry(self.hass, live)
             if hub is not None:
                 new_hub = dict(hub.data)
                 changed = False
@@ -216,7 +221,7 @@ class DeviceControl:
                     new_hub[CONF_REFRESH_TOKEN] = cloud.refresh_token
                     changed = True
                 if changed:
-                    self.hass.config_entries.async_update_entry(hub, data=new_hub)
+                    async_update_entry_data(self.hass, hub, data=new_hub)
 
         async def _lan() -> None:
             await self.client.async_write_device(service, value)
@@ -265,7 +270,8 @@ class DeviceControl:
             return await self.client.async_fetch_status()
 
         async def _cloud() -> dict[str, Any]:
-            creds = await async_refresh_cloud_auth(self.hass, self.entry)
+            live = self._live_entry()
+            creds = await async_refresh_cloud_auth(self.hass, live)
             if not creds:
                 raise CloudApiError("missing cloud GWID/Auth")
             gwid, auth = creds
@@ -317,7 +323,3 @@ class DeviceControl:
 def default_cloud_command_types(profile_service_ids: list[int] | None) -> list[str]:
     ids = profile_service_ids or [0x00, 0x01, 0x02, 0x03, 0x04, 0x0F, 0x17]
     return [command_type_hex(i) for i in ids]
-
-
-# Avoid unused import lint for status_key when used by callers
-_ = status_key

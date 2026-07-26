@@ -26,6 +26,13 @@ from .cloud_sync import (
     async_sync_cloud_to_devices,
     cloud_fields_from_device,
 )
+from .flow_helpers import (
+    cloud_only_import_data as _cloud_only_import_data,
+    configured_ids as _configured_ids,
+    configured_macs as _configured_macs,
+    ems_to_sa_type as _ems_to_sa_type,
+    hub_entry as _hub_entry,
+)
 from .const import (
     CONF_CLOUD_AUTH,
     CONF_CLOUD_DEVICE_TYPE,
@@ -104,60 +111,6 @@ def _model_type_choices(sa_type: int | None = None) -> dict[str, str]:
     return choices
 
 
-def _hub_entry(hass: HomeAssistant) -> ConfigEntry | None:
-    for entry in hass.config_entries.async_entries(DOMAIN):
-        if entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_HUB:
-            return entry
-    return None
-
-
-def _configured_ids(hass: HomeAssistant) -> set[str]:
-    """MAC / GWID / unique_id keys already configured as device entries."""
-    out: set[str] = set()
-    for entry in hass.config_entries.async_entries(DOMAIN):
-        if entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_HUB:
-            continue
-        for raw in (
-            entry.unique_id,
-            entry.data.get("mac"),
-            entry.data.get(CONF_CLOUD_GWID),
-        ):
-            if not raw:
-                continue
-            key = str(raw).lower()
-            if key.startswith("gwid:"):
-                key = key[5:]
-            out.add(key)
-            if len(key) == 12:
-                out.add(key)
-    return out
-
-
-def _configured_macs(hass: HomeAssistant) -> set[str]:
-    """Back-compat alias used by discover/manual flows."""
-    return {k for k in _configured_ids(hass) if len(k) == 12}
-
-
-def _ems_to_sa_type(device_type: int) -> int:
-    """EMS DeviceType aligns with TaiSEIA type ids for common appliances."""
-    try:
-        return int(device_type)
-    except (TypeError, ValueError):
-        return TYPE_AC
-
-
-def _cloud_only_import_data(cd: CloudDevice, *, mac: str | None = None) -> dict[str, Any]:
-    sa_type = _ems_to_sa_type(cd.device_type)
-    return {
-        CONF_HOST: "0.0.0.0",
-        CONF_NAME: format_cloud_title(cd.nickname),
-        CONF_INDOOR_MODEL: cd.model or None,
-        CONF_MODEL_TYPE: cd.model_type or None,
-        CONF_DEVICE_TYPE: sa_type,
-        "mac": (mac or cd.mac or "").upper() or None,
-        "cloud_only": True,
-        **cloud_fields_from_device(cd),
-    }
 
 
 class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -307,10 +260,12 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._cloud_devices = await cloud.async_get_devices()
                 hub = _hub_entry(self.hass)
                 if hub is not None:
+                    from .entry_helpers import async_update_entry_data
+
                     new_data = dict(hub.data)
                     new_data[CONF_CP_TOKEN] = cloud.cp_token
                     new_data[CONF_REFRESH_TOKEN] = cloud.refresh_token
-                    self.hass.config_entries.async_update_entry(hub, data=new_data)
+                    async_update_entry_data(self.hass, hub, data=new_data)
                 if self._account:
                     self._cp_token = cloud.cp_token
                     self._refresh_token = cloud.refresh_token
@@ -344,7 +299,43 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._import_candidates[key] = _cloud_only_import_data(cd, mac=mac)
             choices[key] = label
 
-        # Cloud inventory
+        # Phase 1: resolve missing LAN hosts via EMS GWIP (bounded concurrency)
+        need_gwip: list[CloudDevice] = []
+        for cd in self._cloud_devices:
+            if not cd.is_local_candidate or not cd.mac:
+                continue
+            mac = cd.mac.upper()
+            if mac.lower() in configured:
+                continue
+            if by_mac.get(mac) is None:
+                need_gwip.append(cd)
+
+        if need_gwip and cloud is not None:
+            import asyncio
+
+            sem = asyncio.Semaphore(4)
+
+            async def _resolve(cd: CloudDevice) -> None:
+                mac = cd.mac.upper()
+                async with sem:
+                    try:
+                        gw_ip = await cloud.async_get_gw_ip(cd.gwid)
+                    except Exception:  # noqa: BLE001
+                        return
+                    if not gw_ip:
+                        return
+                    probed = await async_probe_host(session, gw_ip)
+                    if probed is None:
+                        return
+                    probed_mac = (probed.mac or "").upper()
+                    if probed_mac and probed_mac != mac:
+                        return
+                    by_mac[mac] = probed
+
+            await asyncio.gather(*(_resolve(cd) for cd in need_gwip))
+
+        # Phase 2: build choices
+        lan_discovered_macs = {(d.mac or "").upper() for d in found if d.mac}
         for cd in self._cloud_devices:
             gwid = (cd.gwid or "").strip()
             if gwid and gwid.lower() in configured:
@@ -362,31 +353,7 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             local = by_mac.get(mac)
             type_name = DEVICE_TYPE_NAMES.get(cd.device_type, str(cd.device_type))
-            source = "區網掃描"
-
-            if local is None and cloud is not None:
-                try:
-                    gw_ip = await cloud.async_get_gw_ip(cd.gwid)
-                except Exception:  # noqa: BLE001
-                    gw_ip = None
-                if gw_ip:
-                    probed = await async_probe_host(session, gw_ip)
-                    if probed is None:
-                        _add_cloud_only(
-                            cd, mac=mac, reason=f"{gw_ip} 埠不通，可雲端控制"
-                        )
-                        continue
-                    probed_mac = (probed.mac or "").upper()
-                    if probed_mac and probed_mac != mac:
-                        _add_cloud_only(
-                            cd,
-                            mac=mac,
-                            reason=f"官網 IP 對到其他模組，改雲端",
-                        )
-                        continue
-                    local = probed
-                    by_mac[mac] = probed
-                    source = "官網 IP"
+            source = "區網掃描" if mac in lan_discovered_macs else "官網 IP"
 
             if local:
                 label = (
@@ -835,7 +802,9 @@ class HubOptionsFlowHandler(config_entries.OptionsFlow):
                         max_concurrent=lan_settings.max_concurrent,
                     )
 
-            self.hass.config_entries.async_update_entry(entry, data=new_data)
+            from .entry_helpers import async_update_entry_data
+
+            async_update_entry_data(self.hass, entry, data=new_data)
             if user_input.get(CONF_PASSWORD) or user_input.get("refresh_cloud"):
                 await async_sync_cloud_to_devices(self.hass, entry)
             return self.async_create_entry(title="", data={})

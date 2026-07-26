@@ -74,12 +74,19 @@ class EmsSettings:
 
 
 class EmsGate:
-    """Process-wide spacing for EMS calls (single lock + min interval)."""
+    """Process-wide EMS spacing with USER-over-BACKGROUND priority.
+
+    In-flight work is never cancelled; waiting callers are ordered so USER
+    requests jump ahead of BACKGROUND polls still queued.
+    """
 
     def __init__(self, settings: EmsSettings | None = None) -> None:
         self.settings = settings or EmsSettings()
-        self._lock = asyncio.Lock()
         self._last_done = 0.0
+        self._seq = 0
+        self._queue: asyncio.PriorityQueue = asyncio.PriorityQueue()
+        self._worker: asyncio.Task | None = None
+        self._ensure_lock = asyncio.Lock()
 
     def apply_settings(self, settings: EmsSettings) -> None:
         self.settings = settings
@@ -90,14 +97,54 @@ class EmsGate:
         *,
         priority: RequestPriority = RequestPriority.NORMAL,
     ):
-        """Serialize EMS work with min_interval. priority reserved for future queue."""
-        _ = priority
-        async with self._lock:
-            gap = self.settings.min_interval - (time.monotonic() - self._last_done)
-            if gap > 0:
-                await asyncio.sleep(gap)
+        """Serialize EMS work with min_interval; higher priority runs first."""
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future = loop.create_future()
+        self._seq += 1
+        # PriorityQueue: lower tuple sorts first → negate priority
+        await self._queue.put((-int(priority), self._seq, coro_factory, fut))
+        await self._ensure_worker()
+        return await fut
+
+    async def _ensure_worker(self) -> None:
+        async with self._ensure_lock:
+            if self._worker is None or self._worker.done():
+                self._worker = asyncio.create_task(
+                    self._worker_loop(), name="ems_gate_worker"
+                )
+
+    async def _worker_loop(self) -> None:
+        while True:
             try:
-                return await coro_factory()
+                item = await asyncio.wait_for(self._queue.get(), timeout=0.05)
+            except asyncio.TimeoutError:
+                # Exit only if still empty under the ensure lock so a concurrent
+                # put()+_ensure_worker() cannot orphan a queued request.
+                async with self._ensure_lock:
+                    if self._queue.empty():
+                        self._worker = None
+                        return
+                continue
+            _prio, _seq, factory, fut = item
+            if fut.cancelled():
+                continue
+            try:
+                gap = self.settings.min_interval - (
+                    time.monotonic() - self._last_done
+                )
+                if gap > 0:
+                    await asyncio.sleep(gap)
+                result = await factory()
+            except asyncio.CancelledError:
+                if not fut.done():
+                    fut.cancel()
+                raise
+            except Exception as err:  # noqa: BLE001
+                if not fut.done():
+                    fut.set_exception(err)
+            else:
+                if not fut.done():
+                    fut.set_result(result)
             finally:
                 self._last_done = time.monotonic()
 

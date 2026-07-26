@@ -110,7 +110,13 @@ from .const import (
     TYPE_AC,
     TYPE_AIR_CLEANER,
     TYPE_DEHUMIDIFIER,
+    TYPE_DRYING_MACHINE,
+    TYPE_FULL_HEAT_EXCHANGER,
+    TYPE_LAMP,
+    TYPE_LIVING_SPACE_CONTROLLER,
     TYPE_REFRIGERATOR,
+    TYPE_WASHING_MACHINE,
+    TYPE_WEIGHT_PLATE,
 )
 from .taiseia import DeviceInfo, ServiceInfo
 
@@ -227,15 +233,115 @@ _LABELS_AIR_CLEANER: dict[int, str] = {
     0x53: LABEL_DH_OFF_TIMER,  # App：時間到關（單位分鐘）
 }
 
+# App CommandList (HDH / MDH / KBS / LX128B). Same service id ≠ dehumidifier!
+_LABELS_WASHING_MACHINE: dict[int, str] = {
+    0x01: "開始洗衣",
+    0x13: "洗衣殘時間",
+    0x14: "預約時間設定",
+    0x15: "預約殘時間",
+    0x19: "異常代碼",
+    0x1E: "累計耗電",
+    0x41: "洗衣殘時間",  # LX128B
+    0x42: "乾衣剩餘時間",  # LX128B
+    0x43: "洗乾剩餘時間",  # LX128B
+    0x4F: "nanoe殘時間",  # LX128B
+    0x50: "運轉情報",
+    0x54: "工程訊息",
+    0x55: "行程別訊息",
+    0x60: "時間調整",
+    0x61: "延後晾衣設定",
+    0x64: "行程設定",
+    0x69: "溫水設定",
+    0x71: "洗衣劑量警告",
+    0x72: "洗衣劑量",
+    0x73: "洗衣機可否洗烘",
+    0x74: "遠隔操作",
+}
+
+# App / ems2 CN-HP（NH-VS100HP-B）
+_LABELS_DRYER: dict[int, str] = {
+    0x00: "電源",
+    0x01: "運轉狀態",
+    0x02: "加熱狀態",
+    0x03: "運轉模式",
+    0x04: "運轉時間",
+    0x05: "剩餘時間",
+    0x06: "乾燥狀態",
+    0x08: "風量",
+    0x09: "溫度",
+    0x0A: "異常代碼",
+    0x0F: "累計耗電",
+    0x15: "預約殘時間",
+    0x50: "運轉情報",
+    0x55: "行程別訊息",
+}
+
+# App CommandList FYZY
+_LABELS_ERV: dict[int, str] = {
+    0x00: "運轉狀態",
+    0x0F: "異常狀態",
+    0x15: "換氣模式",
+    0x50: "時間到開",
+    0x51: "時間到關",
+    0x52: "過濾器重置",
+    0x53: "OA過濾器清掃剩餘時間",
+    0x54: "OA過濾器更換剩餘時間",
+    0x55: "OA過濾器更換週期",
+    0x56: "風量",
+}
+
+# App CommandList WTY / WTYF
+_LABELS_SWITCH: dict[int, str] = {
+    0x00: "運轉狀態",
+    0x01: "亮度",
+    0x70: "全狀態查詢",
+    0x71: "時間到開",
+    0x72: "時間到關",
+    0x73: "維修模式",
+    0x74: "亮度下限值",
+}
+
+# App / ems2 PZE1（NY-PZE1-W）
+_LABELS_WEIGHT_PLATE: dict[int, str] = {
+    0x52: "取得重量",
+    0x80: "食品名稱",
+    0x81: "管理模式",
+    0x82: "管理數值",
+    0x83: "最大量",
+    0x84: "購入日",
+    0x85: "期限日",
+    0x8A: "通訊模式",
+    0x8B: "通訊時間",
+    0x8C: "總重量",
+    0x8D: "還原重量",
+    0x8E: "電量不足",
+}
+
+_LABELS_LIVING_SPACE: dict[int, str] = {
+    0x00: "運轉狀態",
+}
+
 SERVICE_LABELS_BY_TYPE: dict[int, dict[int, str]] = {
     TYPE_AC: _LABELS_AC,
     TYPE_DEHUMIDIFIER: _LABELS_DEHUMIDIFIER,
     TYPE_REFRIGERATOR: _LABELS_REFRIGERATOR,
     TYPE_AIR_CLEANER: _LABELS_AIR_CLEANER,
+    TYPE_WASHING_MACHINE: _LABELS_WASHING_MACHINE,
+    TYPE_DRYING_MACHINE: _LABELS_DRYER,
+    TYPE_FULL_HEAT_EXCHANGER: _LABELS_ERV,
+    TYPE_LAMP: _LABELS_SWITCH,
+    TYPE_WEIGHT_PLATE: _LABELS_WEIGHT_PLATE,
+    TYPE_LIVING_SPACE_CONTROLLER: _LABELS_LIVING_SPACE,
 }
 
 # Backward-compatible flat map (AC-first; prefer service_label(..., sa_type=)).
 SERVICE_LABELS: dict[int, str] = dict(_LABELS_AC)
+
+# Services with the same meaning across all TaiSEIA appliance types.
+_LABELS_COMMON: dict[int, str] = {
+    SVC_POWER: "電源",
+    SVC_MODE: "運轉模式",
+}
 
 
 def service_label(
@@ -248,9 +354,14 @@ def service_label(
     if name_overrides and service_id in name_overrides:
         return name_overrides[service_id]
     if sa_type is not None:
-        typed = SERVICE_LABELS_BY_TYPE.get(sa_type, {})
-        if service_id in typed:
-            return typed[service_id]
+        typed = SERVICE_LABELS_BY_TYPE.get(sa_type)
+        if typed is not None:
+            if service_id in typed:
+                return typed[service_id]
+            # Known type table exists — never borrow another appliance's labels.
+            return _LABELS_COMMON.get(service_id, f"服務 0x{service_id:02X}")
+        # Types without a curated table (e.g. TV): only common labels.
+        return _LABELS_COMMON.get(service_id, f"服務 0x{service_id:02X}")
     return SERVICE_LABELS.get(service_id, f"服務 0x{service_id:02X}")
 
 
@@ -430,6 +541,108 @@ def _decode_air_cleaner(service_id: int, val: int) -> str | None:
     return str(val)
 
 
+_WM_OPERATING = {
+    1: "待機中",
+    2: "動作中",
+    3: "預約中",
+    4: "預約中",
+    5: "終了",
+}
+_WM_PROGRESS = {
+    1: "預洗",
+    2: "浸泡",
+    3: "洗衣",
+    4: "洗清",
+    5: "脫水",
+    6: "乾衣",
+    7: "烘乾",
+    8: "鬆布",
+    9: "鬆柔冷卻",
+    10: "nanoe",
+    11: "延後晾衣",
+    12: "槽除黴",
+}
+
+
+def _decode_washing_machine(service_id: int, val: int) -> str | None:
+    if service_id == 0x01:
+        return "開始" if val else "暫停／停止"
+    if service_id == 0x50:
+        return _WM_OPERATING.get(val, str(val))
+    if service_id == 0x54:
+        return _WM_PROGRESS.get(val, str(val))
+    if service_id in (0x13, 0x15, 0x41, 0x42, 0x43, 0x4F):
+        return f"{val} 分"
+    if service_id == 0x69:
+        return "溫水" if val else "關"
+    return str(val)
+
+
+_DRYER_STATUS = {0: "停止中", 1: "暫停", 2: "動作中"}
+_DRYER_HEAT = {0: "弱", 1: "強"}
+_DRYER_MODE = {0: "標準", 1: "厚物", 2: "長時間", 3: "短時間", 4: "預留"}
+_ERV_VENT = {1: "全熱換氣", 2: "普通換氣"}
+_ERV_FAN = {0: "弱", 1: "強"}
+_SWITCH_CIRCUIT = {
+    0: "全OFF",
+    1: "迴路一ON",
+    2: "迴路二ON",
+    3: "迴路一、二ON",
+    4: "迴路三ON",
+    5: "迴路一、三ON",
+    6: "迴路二、三ON",
+    7: "全ON",
+}
+
+
+def _decode_dryer(service_id: int, val: int) -> str | None:
+    if service_id == 0x00:
+        return _on_off(val)
+    if service_id == 0x01:
+        return _DRYER_STATUS.get(val, str(val))
+    if service_id == 0x02:
+        return _DRYER_HEAT.get(val, str(val))
+    if service_id == 0x03:
+        return _DRYER_MODE.get(val, str(val))
+    if service_id == 0x06:
+        return "乾衣" if val else "送風"
+    if service_id in (0x05, 0x15):
+        return f"{val} 分"
+    return str(val)
+
+
+def _decode_erv(service_id: int, val: int) -> str | None:
+    if service_id == 0x00:
+        return _on_off(val)
+    if service_id == 0x15:
+        return _ERV_VENT.get(val, str(val))
+    if service_id == 0x56:
+        return _ERV_FAN.get(val, str(val))
+    if service_id in (0x50, 0x51):
+        return f"{val} 時"
+    return str(val)
+
+
+def _decode_switch(service_id: int, val: int) -> str | None:
+    if service_id in (0x00, 0x73):
+        return _on_off(val)
+    if service_id == 0x70:
+        return _SWITCH_CIRCUIT.get(val, str(val))
+    if service_id == 0x01:
+        return f"{val}%"
+    if service_id in (0x71, 0x72):
+        return f"{val} 分"
+    return str(val)
+
+
+def _decode_weight_plate(service_id: int, val: int) -> str | None:
+    if service_id in (0x52, 0x83, 0x8C, 0x8D):
+        return f"{val} g"
+    if service_id == 0x8E:
+        return "低電量" if val else "正常"
+    return str(val)
+
+
 def decode_status_value(sa_type: int, service_id: int, raw: Any) -> str | None:
     """Human-readable decode for common TaiSEIA status values (type-aware)."""
     val = _parse_int(raw)
@@ -444,6 +657,18 @@ def decode_status_value(sa_type: int, service_id: int, raw: Any) -> str | None:
         return _decode_refrigerator(service_id, val)
     if sa_type == TYPE_AIR_CLEANER:
         return _decode_air_cleaner(service_id, val)
+    if sa_type == TYPE_WASHING_MACHINE:
+        return _decode_washing_machine(service_id, val)
+    if sa_type == TYPE_DRYING_MACHINE:
+        return _decode_dryer(service_id, val)
+    if sa_type == TYPE_FULL_HEAT_EXCHANGER:
+        return _decode_erv(service_id, val)
+    if sa_type == TYPE_LAMP:
+        return _decode_switch(service_id, val)
+    if sa_type == TYPE_WEIGHT_PLATE:
+        return _decode_weight_plate(service_id, val)
+    if sa_type == TYPE_LIVING_SPACE_CONTROLLER:
+        return _on_off(val) if service_id == 0x00 else str(val)
     return str(val)
 
 
@@ -528,6 +753,50 @@ _HIGHLIGHTS_BY_TYPE: dict[int, tuple[int, ...]] = {
         0x50,
         0x51,
         0x52,
+    ),
+    TYPE_WASHING_MACHINE: (
+        0x01,
+        0x50,
+        0x54,
+        0x55,
+        0x13,
+        0x15,
+        0x64,
+        0x69,
+        0x74,
+    ),
+    TYPE_DRYING_MACHINE: (
+        0x00,
+        0x01,
+        0x03,
+        0x05,
+        0x06,
+        0x15,
+        0x50,
+    ),
+    TYPE_FULL_HEAT_EXCHANGER: (
+        0x00,
+        0x15,
+        0x56,
+        0x0F,
+        0x53,
+        0x54,
+    ),
+    TYPE_LAMP: (
+        0x00,
+        0x01,
+        0x70,
+        0x71,
+        0x72,
+    ),
+    TYPE_WEIGHT_PLATE: (
+        0x52,
+        0x8C,
+        0x80,
+        0x8E,
+    ),
+    TYPE_LIVING_SPACE_CONTROLLER: (
+        0x00,
     ),
 }
 

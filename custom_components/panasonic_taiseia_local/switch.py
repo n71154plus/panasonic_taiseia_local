@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from homeassistant.components.switch import SwitchEntity
+from homeassistant.const import EntityCategory
 from homeassistant.exceptions import HomeAssistantError
 
 from .catalog import iter_kind, service_allowed
@@ -19,6 +20,8 @@ from .const import (
 from .entity import TaiSeiaBaseEntity
 
 _LOGGER = logging.getLogger(__package__)
+
+PARALLEL_UPDATES = 1
 
 
 async def async_setup_entry(hass, entry, async_add_entities) -> bool:
@@ -49,6 +52,8 @@ async def async_setup_entry(hass, entry, async_add_entities) -> bool:
 
 
 class TaiSeiaSwitch(TaiSeiaBaseEntity, SwitchEntity):
+    _attr_entity_category = EntityCategory.CONFIG
+
     def __init__(
         self,
         coordinator,
@@ -71,7 +76,7 @@ class TaiSeiaSwitch(TaiSeiaBaseEntity, SwitchEntity):
 
     @property
     def label(self) -> str:
-        return f"{self.nickname} {self._switch_label}"
+        return self._switch_label
 
     @property
     def icon(self) -> str:
@@ -99,8 +104,10 @@ class TaiSeiaSwitch(TaiSeiaBaseEntity, SwitchEntity):
             value = 0 if turn_on else 1
         else:
             value = 1 if turn_on else 0
-        self.set_local_status(self._status_key, str(value))
+        prev = self.device_status.get(self._status_key)
         try:
-            await self.async_device_write(self._service, value)
+            await self.async_write_with_rollback(
+                self._service, value, self._status_key, prev
+            )
         except Exception as err:  # noqa: BLE001
             raise HomeAssistantError(str(err)) from err

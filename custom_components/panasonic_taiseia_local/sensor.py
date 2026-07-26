@@ -39,6 +39,8 @@ from .diagnostics_data import build_device_snapshot, probe_sensor_attributes
 from .entity import TaiSeiaBaseEntity
 from .probe_info import type_summary
 
+PARALLEL_UPDATES = 1
+
 
 def _signed(raw: int) -> int:
     if raw > 200:
@@ -221,10 +223,8 @@ class TaiSeiaEnergySensor(TaiSeiaBaseEntity, SensorEntity):
     @property
     def label(self) -> str:
         if self._kind == "total":
-            suffix = "累計耗電"
-        else:
-            suffix = (self.coordinator.data or {}).get("energy_period_label") or "本期耗電"
-        return f"{self.nickname} {suffix}"
+            return "累計耗電"
+        return (self.coordinator.data or {}).get("energy_period_label") or "本期耗電"
 
     @property
     def available(self) -> bool:
@@ -254,7 +254,7 @@ class TaiSeiaEnergySensor(TaiSeiaBaseEntity, SensorEntity):
 class TaiSeiaHouseMonthlyEnergySensor(SensorEntity):
     """Sum of panasonic_taiseia_local period energy trackers (on hub device when present)."""
 
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
     _attr_name = "全室冷氣本期耗電"
     _attr_suggested_object_id = "house_climate_energy_taiseia_local"
     _attr_unique_id = f"{DOMAIN}_house_monthly_energy"
@@ -262,7 +262,7 @@ class TaiSeiaHouseMonthlyEnergySensor(SensorEntity):
     _attr_state_class = SensorStateClass.TOTAL
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
     _attr_icon = "mdi:home-lightning-bolt"
-    _attr_should_poll = True
+    _attr_should_poll = False
 
     def __init__(
         self, hass: HomeAssistant, hub_entry: ConfigEntry | None
@@ -279,9 +279,21 @@ class TaiSeiaHouseMonthlyEnergySensor(SensorEntity):
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
         self._bind_listeners()
+        # New device entries may appear after hub setup — refresh bindings periodically
+        from datetime import timedelta
 
-    async def async_update(self) -> None:
+        from homeassistant.helpers.event import async_track_time_interval
+
+        self.async_on_remove(
+            async_track_time_interval(
+                self.hass, self._on_interval, timedelta(minutes=5)
+            )
+        )
+
+    @callback
+    def _on_interval(self, _now) -> None:
         self._bind_listeners()
+        self.async_write_ha_state()
 
     @callback
     def _bind_listeners(self) -> None:
@@ -294,12 +306,14 @@ class TaiSeiaHouseMonthlyEnergySensor(SensorEntity):
             coordinator = data.get(DATA_COORDINATOR)
             if coordinator is None:
                 continue
+            # Capture coordinator explicitly (avoid late-binding surprises)
+            self._unsubs.append(
+                coordinator.async_add_listener(self._on_coordinator_update)
+            )
 
-            @callback
-            def _updated() -> None:
-                self.async_write_ha_state()
-
-            self._unsubs.append(coordinator.async_add_listener(_updated))
+    @callback
+    def _on_coordinator_update(self) -> None:
+        self.async_write_ha_state()
 
     async def async_will_remove_from_hass(self) -> None:
         for unsub in self._unsubs:
@@ -370,7 +384,7 @@ class TaiSeiaProbeInfoSensor(TaiSeiaBaseEntity, SensorEntity):
 
     @property
     def label(self) -> str:
-        return f"{self.nickname} 探測資訊"
+        return "探測資訊"
 
     @property
     def available(self) -> bool:
@@ -450,7 +464,7 @@ class TaiSeiaNumericSensor(TaiSeiaBaseEntity, SensorEntity):
 
     @property
     def label(self) -> str:
-        return f"{self.nickname} {self._label_suffix}"
+        return self._label_suffix
 
     @property
     def icon(self) -> str:
@@ -491,7 +505,7 @@ class TaiSeiaGenericSensor(TaiSeiaBaseEntity, SensorEntity):
 
     @property
     def label(self) -> str:
-        return f"{self.nickname} {self._label_suffix}"
+        return self._label_suffix
 
     @property
     def icon(self) -> str:

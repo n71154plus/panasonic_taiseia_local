@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from homeassistant.components.number import NumberEntity, NumberMode
+from homeassistant.const import EntityCategory
+from homeassistant.exceptions import HomeAssistantError
 
 from .capability import timer_limits
 from .catalog import iter_kind, service_allowed
@@ -15,6 +17,8 @@ from .const import (
     UNIT_MINUTE,
 )
 from .entity import TaiSeiaBaseEntity
+
+PARALLEL_UPDATES = 1
 
 
 async def async_setup_entry(hass, entry, async_add_entities) -> bool:
@@ -58,6 +62,7 @@ async def async_setup_entry(hass, entry, async_add_entities) -> bool:
 class TaiSeiaTimerNumber(TaiSeiaBaseEntity, NumberEntity):
     _attr_mode = NumberMode.BOX
     _attr_native_step = 1
+    _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(
         self,
@@ -87,7 +92,7 @@ class TaiSeiaTimerNumber(TaiSeiaBaseEntity, NumberEntity):
 
     @property
     def label(self) -> str:
-        return f"{self.nickname} {self._number_label}"
+        return self._number_label
 
     @property
     def icon(self) -> str:
@@ -122,5 +127,10 @@ class TaiSeiaTimerNumber(TaiSeiaBaseEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         ivalue = int(value)
-        self.set_local_status(self._status_key, str(ivalue))
-        await self.async_device_write(self._service, ivalue)
+        prev = self.device_status.get(self._status_key)
+        try:
+            await self.async_write_with_rollback(
+                self._service, ivalue, self._status_key, prev
+            )
+        except Exception as err:  # noqa: BLE001
+            raise HomeAssistantError(str(err)) from err

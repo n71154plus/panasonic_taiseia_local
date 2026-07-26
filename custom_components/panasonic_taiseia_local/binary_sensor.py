@@ -18,6 +18,8 @@ from .const import (
 )
 from .entity import TaiSeiaBaseEntity
 
+PARALLEL_UPDATES = 1
+
 
 async def async_setup_entry(hass, entry, async_add_entities) -> bool:
     client = hass.data[DOMAIN][entry.entry_id][DATA_CLIENT]
@@ -92,7 +94,7 @@ class TaiSeiaBinaryFlag(TaiSeiaBaseEntity, BinarySensorEntity):
 
     @property
     def label(self) -> str:
-        return f"{self.nickname} {self._label_suffix}"
+        return self._label_suffix
 
     @property
     def icon(self) -> str:

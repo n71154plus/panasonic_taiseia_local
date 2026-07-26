@@ -148,6 +148,8 @@ TYPE_FULL_HEAT_EXCHANGER = 0x0E
 TYPE_FAN = 0x0F
 TYPE_GAS_WATER_HEATER = 0x10
 TYPE_LAMP = 0x11
+TYPE_WEIGHT_PLATE = 23  # EMS / App DeviceType（重量檢知盤）
+TYPE_LIVING_SPACE_CONTROLLER = 24  # EMS / App DeviceType（住空間控制器）
 TYPE_SMART_METER_GATEWAY = 0xE0
 TYPE_GENERAL_DEVICE = 0xF0
 
@@ -158,7 +160,7 @@ DEVICE_TYPE_NAMES = {
     TYPE_WASHING_MACHINE: "洗衣機",
     TYPE_DEHUMIDIFIER: "除濕機",
     TYPE_TELEVISION: "電視機",
-    TYPE_DRYING_MACHINE: "烘衣機",
+    TYPE_DRYING_MACHINE: "乾衣機",
     TYPE_HEAT_PUMP_WATER_HEATER: "熱泵熱水器",
     TYPE_AIR_CLEANER: "空氣清淨機",
     TYPE_ELECTRONIC_POT: "電子鍋",
@@ -169,7 +171,9 @@ DEVICE_TYPE_NAMES = {
     TYPE_FULL_HEAT_EXCHANGER: "全熱交換器",
     TYPE_FAN: "電扇",
     TYPE_GAS_WATER_HEATER: "燃氣熱水器",
-    TYPE_LAMP: "燈具",
+    TYPE_LAMP: "智慧開關",
+    TYPE_WEIGHT_PLATE: "重量檢知盤",
+    TYPE_LIVING_SPACE_CONTROLLER: "住空間控制器",
     TYPE_SMART_METER_GATEWAY: "智慧電表閘道器",
     TYPE_GENERAL_DEVICE: "通用裝置",
 }
@@ -424,6 +428,29 @@ ENTITY_SERVICES_BY_TYPE = {
         SVC_RF_ECO, SVC_RF_DEFROST, SVC_RF_STOP_ICE, SVC_RF_QUICK_ICE, SVC_RF_RAPID_FREEZE,
         SVC_RF_PARTIAL_SET, SVC_RF_PARTIAL_TEMP, SVC_RF_WINTER, SVC_RF_SHOPPING,
         SVC_RF_VACATION, SVC_RF_NANOE,
+    ],
+    TYPE_WASHING_MACHINE: [
+        0x01, 0x13, 0x14, 0x15, 0x19, 0x1E, 0x50, 0x54, 0x55, 0x60, 0x61, 0x64,
+        0x69, 0x71, 0x72, 0x73, 0x74,
+    ],
+    TYPE_DRYING_MACHINE: [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x08, 0x09, 0x0A, 0x0F, 0x15,
+        0x50, 0x55,
+    ],
+    TYPE_AIR_CLEANER: [
+        0x00, 0x01, 0x07, 0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57,
+    ],
+    TYPE_FULL_HEAT_EXCHANGER: [
+        0x00, 0x0F, 0x15, 0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56,
+    ],
+    TYPE_LAMP: [
+        0x00, 0x01, 0x70, 0x71, 0x72, 0x73, 0x74,
+    ],
+    TYPE_WEIGHT_PLATE: [
+        0x52, 0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x8A, 0x8B, 0x8C, 0x8D, 0x8E,
+    ],
+    TYPE_LIVING_SPACE_CONTROLLER: [
+        0x00,
     ],
 }
 

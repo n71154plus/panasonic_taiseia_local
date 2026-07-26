@@ -9,21 +9,21 @@ Home Assistant custom integration for **Panasonic TaiSEIA** appliances — **LAN
 
 ## Changelog
 
-### v1.7.0 — Hybrid cloud + local control
+### v1.7.2
 
-**Why:** Turning the AC **off over LAN `SetSaanet` alone does not run Panasonic’s official 乾燥防霉 (mold prevention)** the way the official App / EMS `DeviceSetCommand` path does. That mismatch was the reason for this release.
+- Fix washing machines (and other types) being misidentified as dehumidifiers
+- Add CommandList support for dryer, ERV, air cleaner, smart switch, weight plate, etc.
 
-**What changed:**
+### v1.7.1
 
-- **Per-device control path** (device options): **hybrid** (default) / **local only** / **cloud only**
-  - **Write (commands):** hybrid → **cloud first**, LAN fallback
-  - **Read (status):** hybrid → **LAN first**, cloud assist on failure
-- EMS APIs follow the **official IoT TW APK** contract (`DeviceSetCommand` / `DeviceGetInfo`, with `CPToken` + `auth` + `GWID`), plus a cleaner rate-limit gate (not a copy of other GitHub clients)
-- **Cloud-only import:** non-LAN GWID devices (e.g. some fridges) and LAN-unreachable modules can be imported as **(雲端)** and controlled via EMS
-- Device titles: **(本地)** vs **(雲端)** by path
-- Official mold prevention after power-off works when OFF is sent on the **cloud** write path (hybrid/cloud modes). A separate LAN “simulate dry” path was **deferred**
+- Fewer unnecessary reloads; safer auth handling in diagnostics
+- Faster EMS writes and lighter LAN polling / discovery
+- Write rollback and entity naming cleanup
 
-Upgrade: reload the integration, then set **Control path** on each device. Prefer **hybrid** on ACs if you want App-like shutdown behavior including 乾燥防霉.
+### v1.7.0
+
+- Hybrid / local / cloud control per device (cloud writes enable official mold prevention on AC off)
+- Cloud-only import for non-LAN devices
 
 ---
 

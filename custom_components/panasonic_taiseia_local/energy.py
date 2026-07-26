@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 import logging
+import time
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -33,6 +34,9 @@ _LOGGER = logging.getLogger(__package__)
 STORAGE_VERSION = 1
 SETTINGS_VERSION = 1
 _MAX_DT_HOURS = 2.0
+# Persist last_ts / power meta at most this often when kWh did not change
+_META_SAVE_INTERVAL_S = 300.0
+_SETTINGS_CACHE_KEY = "_energy_settings_cache"
 # Fixed epoch for N-day rolling periods (local calendar dates)
 _DAYS_EPOCH = date(2020, 1, 1)
 
@@ -128,9 +132,7 @@ class EnergySettings:
         }
 
 
-async def async_get_energy_settings(hass: HomeAssistant) -> EnergySettings:
-    store = Store(hass, SETTINGS_VERSION, f"{DOMAIN}_energy_settings")
-    raw = await store.async_load()
+def _settings_from_raw(raw: dict[str, Any] | None) -> EnergySettings:
     if not isinstance(raw, dict):
         return EnergySettings()
     cycle = str(raw.get(CONF_ENERGY_CYCLE) or DEFAULT_ENERGY_CYCLE)
@@ -147,9 +149,7 @@ async def async_get_energy_settings(hass: HomeAssistant) -> EnergySettings:
     except (TypeError, ValueError):
         reset_weekday = DEFAULT_ENERGY_RESET_WEEKDAY
     try:
-        cycle_days = int(
-            raw.get(CONF_ENERGY_CYCLE_DAYS) or DEFAULT_ENERGY_CYCLE_DAYS
-        )
+        cycle_days = int(raw.get(CONF_ENERGY_CYCLE_DAYS) or DEFAULT_ENERGY_CYCLE_DAYS)
     except (TypeError, ValueError):
         cycle_days = DEFAULT_ENERGY_CYCLE_DAYS
     return EnergySettings(
@@ -160,11 +160,24 @@ async def async_get_energy_settings(hass: HomeAssistant) -> EnergySettings:
     )
 
 
+async def async_get_energy_settings(hass: HomeAssistant) -> EnergySettings:
+    domain = hass.data.setdefault(DOMAIN, {})
+    cached = domain.get(_SETTINGS_CACHE_KEY)
+    if isinstance(cached, EnergySettings):
+        return cached
+    store = Store(hass, SETTINGS_VERSION, f"{DOMAIN}_energy_settings")
+    raw = await store.async_load()
+    settings = _settings_from_raw(raw if isinstance(raw, dict) else None)
+    domain[_SETTINGS_CACHE_KEY] = settings
+    return settings
+
+
 async def async_save_energy_settings(
     hass: HomeAssistant, settings: EnergySettings
 ) -> None:
     store = Store(hass, SETTINGS_VERSION, f"{DOMAIN}_energy_settings")
     await store.async_save(settings.as_dict())
+    hass.data.setdefault(DOMAIN, {})[_SETTINGS_CACHE_KEY] = settings
 
 
 @dataclass
@@ -178,6 +191,8 @@ class EnergyTracker:
     last_ts: datetime | None = None
     settings: EnergySettings = field(default_factory=EnergySettings)
     _dirty: bool = False
+    _meta_dirty: bool = False
+    _last_save_mono: float = 0.0
 
     @property
     def month_kwh(self) -> float:
@@ -281,7 +296,8 @@ class EnergyTracker:
         if power_w is not None:
             self.last_power_w = float(power_w)
             self.last_ts = now
-            self._dirty = True
+            # Timestamp/power sample — throttle disk writes via _meta_dirty
+            self._meta_dirty = True
 
         return self.period_kwh
 
@@ -303,9 +319,20 @@ async def async_load_tracker(
 
 
 async def async_save_tracker(
-    hass: HomeAssistant, entry_id: str, tracker: EnergyTracker
+    hass: HomeAssistant,
+    entry_id: str,
+    tracker: EnergyTracker,
+    *,
+    force: bool = False,
 ) -> None:
-    if not tracker._dirty:  # noqa: SLF001
+    now = time.monotonic()
+    should = force or tracker._dirty  # noqa: SLF001
+    if not should and tracker._meta_dirty:  # noqa: SLF001
+        if now - tracker._last_save_mono >= _META_SAVE_INTERVAL_S:  # noqa: SLF001
+            should = True
+    if not should:
         return
     await _store(hass, entry_id).async_save(tracker.as_dict())
     tracker._dirty = False  # noqa: SLF001
+    tracker._meta_dirty = False  # noqa: SLF001
+    tracker._last_save_mono = now  # noqa: SLF001

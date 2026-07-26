@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from homeassistant.components.button import ButtonEntity
+from homeassistant.const import EntityCategory
 from homeassistant.exceptions import HomeAssistantError
 
 from .catalog import service_allowed
@@ -21,6 +22,8 @@ from .const import (
 )
 from .energy import async_save_tracker
 from .entity import TaiSeiaBaseEntity
+
+PARALLEL_UPDATES = 1
 
 
 async def async_setup_entry(hass, entry, async_add_entities) -> bool:
@@ -73,6 +76,7 @@ class TaiSeiaFilterCleanedButton(TaiSeiaBaseEntity, ButtonEntity):
     """Press after cleaning the filter — clears the 須清洗 flag on the AC."""
 
     _attr_icon = ICON_FILTER
+    _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(
         self,
@@ -88,7 +92,7 @@ class TaiSeiaFilterCleanedButton(TaiSeiaBaseEntity, ButtonEntity):
 
     @property
     def label(self) -> str:
-        return f"{self.nickname} 濾網已清洗"
+        return "濾網已清洗"
 
     async def async_press(self) -> None:
         try:
@@ -103,6 +107,7 @@ class TaiSeiaFilterCleanedButton(TaiSeiaBaseEntity, ButtonEntity):
 
 class TaiSeiaEnergyResetButton(TaiSeiaBaseEntity, ButtonEntity):
     _attr_icon = "mdi:restart"
+    _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(
         self,
@@ -121,8 +126,8 @@ class TaiSeiaEnergyResetButton(TaiSeiaBaseEntity, ButtonEntity):
     @property
     def label(self) -> str:
         if self._kind == "total":
-            return f"{self.nickname} 重置累計耗電"
-        return f"{self.nickname} 重置本期耗電"
+            return "重置累計耗電"
+        return "重置本期耗電"
 
     async def async_press(self) -> None:
         tracker = self.hass.data[DOMAIN][self.entry_id].get(DATA_ENERGY)

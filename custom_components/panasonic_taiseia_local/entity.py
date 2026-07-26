@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 from homeassistant.helpers.device_registry import CONNECTION_NETWORK_MAC
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -14,6 +15,7 @@ from .taiseia import TaiSeiaClient, status_key
 
 class TaiSeiaBaseEntity(CoordinatorEntity, ABC):
     _entity_key: str = "base"
+    _attr_has_entity_name = True
 
     def __init__(self, coordinator, client: TaiSeiaClient, entry_id: str) -> None:
         super().__init__(coordinator)
@@ -21,12 +23,11 @@ class TaiSeiaBaseEntity(CoordinatorEntity, ABC):
         self.entry_id = entry_id
         # Force registry registration (HA reads unique_id during add)
         self._attr_unique_id = f"{client.device.unique_id}_{self._entity_key}"
-        self._attr_has_entity_name = False
 
     @property
     @abstractmethod
     def label(self) -> str:
-        ...
+        """Feature name (without device nickname); used as entity name."""
 
     @property
     def nickname(self) -> str:
@@ -54,11 +55,10 @@ class TaiSeiaBaseEntity(CoordinatorEntity, ABC):
         model_base = indoor or d.sa_model or d.model_number or d.model_name
         host = d.host or self.client.host
         port = d.port or self.client.port
-        status = data.get("status") or {}
         model_bits = [model_base, type_summary(d)]
         if model_type:
             model_bits.append(model_type)
-        info = {
+        info: dict[str, Any] = {
             "identifiers": {(DOMAIN, d.unique_id)},
             "name": self.nickname,
             "manufacturer": d.manufacturer or MANUFACTURER,
@@ -67,32 +67,11 @@ class TaiSeiaBaseEntity(CoordinatorEntity, ABC):
         }
         if host and host not in ("", "0.0.0.0"):
             info["configuration_url"] = f"http://{host}:{port}"
-        fw = d.sw_version or ""
-        cloud_nick = data.get("cloud_nickname")
-        path = data.get("control_path")
-        sw_bits = [b for b in (fw, f"狀態×{len(status)}") if b]
-        if cloud_nick:
-            sw_bits.append(f"雲端:{cloud_nick}")
-        if path:
-            sw_bits.append(f"路徑:{path}")
-        if sw_bits:
-            info["sw_version"] = " · ".join(sw_bits)
-        hw_parts = [
-            p
-            for p in (
-                d.model_name or None,
-                d.sa_model or d.model_number or None,
-                data.get("cloud_model_id"),
-            )
-            if p
-        ]
-        if host and host not in ("", "0.0.0.0"):
-            hw_parts.append(host)
-        hw_parts.append(f"服務×{len(d.services)}")
-        mode = data.get("control_mode")
-        if mode:
-            hw_parts.append(f"控制:{mode}")
-        info["hw_version"] = " · ".join(str(p) for p in hw_parts)
+        if d.sw_version:
+            info["sw_version"] = d.sw_version
+        hw = d.model_name or d.sa_model or d.model_number
+        if hw:
+            info["hw_version"] = str(hw)
         serial = data.get("cloud_gwid") or d.mac
         if serial:
             info["serial_number"] = str(serial).upper()
@@ -134,6 +113,17 @@ class TaiSeiaBaseEntity(CoordinatorEntity, ABC):
         self.coordinator.update_local_state(status_key_name, value)  # type: ignore[attr-defined]
         self.coordinator.async_set_updated_data(self.coordinator.data)
         self.async_write_ha_state()
+
+    async def async_write_with_rollback(
+        self, service: int, value: int, status_key_name: str, previous
+    ) -> None:
+        """Optimistic UI update; restore previous status if the write fails."""
+        self.set_local_status(status_key_name, str(value))
+        try:
+            await self.async_device_write(service, value)
+        except Exception:
+            self.set_local_status(status_key_name, previous)
+            raise
 
     async def async_device_write(self, service: int, value: int) -> None:
         """Write via DeviceControl facade (hybrid/local/cloud)."""

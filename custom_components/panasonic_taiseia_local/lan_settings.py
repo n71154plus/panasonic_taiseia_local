@@ -21,6 +21,7 @@ from .const import (
 )
 
 STORAGE_VERSION = 1
+_LAN_CACHE_KEY = "_lan_settings_cache"
 
 
 @dataclass
@@ -47,9 +48,7 @@ def _clamp(settings: LanSettings) -> LanSettings:
     return settings
 
 
-async def async_get_lan_settings(hass: HomeAssistant) -> LanSettings:
-    store = Store(hass, STORAGE_VERSION, f"{DOMAIN}_lan_settings")
-    raw = await store.async_load()
+def _from_raw(raw: dict[str, Any] | None) -> LanSettings:
     if not isinstance(raw, dict):
         return LanSettings()
     try:
@@ -69,6 +68,20 @@ async def async_get_lan_settings(hass: HomeAssistant) -> LanSettings:
         return LanSettings()
 
 
-async def async_save_lan_settings(hass: HomeAssistant, settings: LanSettings) -> None:
+async def async_get_lan_settings(hass: HomeAssistant) -> LanSettings:
+    domain = hass.data.setdefault(DOMAIN, {})
+    cached = domain.get(_LAN_CACHE_KEY)
+    if isinstance(cached, LanSettings):
+        return cached
     store = Store(hass, STORAGE_VERSION, f"{DOMAIN}_lan_settings")
-    await store.async_save(_clamp(settings).as_dict())
+    raw = await store.async_load()
+    settings = _from_raw(raw if isinstance(raw, dict) else None)
+    domain[_LAN_CACHE_KEY] = settings
+    return settings
+
+
+async def async_save_lan_settings(hass: HomeAssistant, settings: LanSettings) -> None:
+    clamped = _clamp(settings)
+    store = Store(hass, STORAGE_VERSION, f"{DOMAIN}_lan_settings")
+    await store.async_save(clamped.as_dict())
+    hass.data.setdefault(DOMAIN, {})[_LAN_CACHE_KEY] = clamped

@@ -430,11 +430,13 @@ class TaiSeiaClient:
         try:
             resp = await self.async_read(TYPE_REGISTER, REG_ALL_STATES)
             states = parse_all_states(resp)
+            all_states_ok = True
         except Exception as err:  # noqa: BLE001
             if not isinstance(err, TaiSeiaError) and not _is_transient(err):
                 raise
             _LOGGER.warning("ALL_STATES failed on %s: %s; falling back", self.host, err)
             states = {}
+            all_states_ok = False
             for svc in poll:
                 if self.device.services and svc not in self.device.services:
                     continue
@@ -442,7 +444,10 @@ class TaiSeiaClient:
                     states[svc] = await self.async_read_device(svc)
                 except Exception:  # noqa: BLE001
                     continue
-        for svc in poll:
+        # When ALL_STATES succeeded, only backfill core entity services — not the
+        # full CommandList (avoids N sequential reads every poll).
+        fill = base if all_states_ok and states else poll
+        for svc in fill:
             if svc not in states and (not self.device.services or svc in self.device.services):
                 try:
                     states[svc] = await self.async_read_device(svc)
