@@ -20,7 +20,12 @@ from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import homeassistant.helpers.config_validation as cv
 
-from .catalog import default_model_type, list_model_types, resolve_model_type
+from .catalog import (
+    default_model_type,
+    list_model_types,
+    model_type_matches_device,
+    resolve_model_type,
+)
 from .cloud import CloudAccount, CloudAuthError, CloudApiError, CloudDevice
 from .cloud_sync import (
     async_sync_cloud_to_devices,
@@ -28,6 +33,7 @@ from .cloud_sync import (
 )
 from .flow_helpers import (
     cloud_only_import_data as _cloud_only_import_data,
+    coalesce_sa_type,
     configured_ids as _configured_ids,
     configured_macs as _configured_macs,
     ems_to_sa_type as _ems_to_sa_type,
@@ -97,16 +103,16 @@ from .lan_settings import (
     async_get_lan_settings,
     async_save_lan_settings,
 )
-from .naming import format_cloud_title, format_local_title
+from .naming import format_cloud_title, format_local_title, mask_account
 from .taiseia import TaiSeiaError, configure_lan_concurrency
 
 
 def _model_type_choices(sa_type: int | None = None) -> dict[str, str]:
-    types = list_model_types()
-    cloud_dt = {1: 1, 2: 2, 4: 4, 8: 8}.get(sa_type or 0)
+    """ModelType picker: preferred for this SA type first, then the rest."""
     choices: dict[str, str] = {"": "自動（依設備類型預設）"}
-    preferred = list_model_types(cloud_dt) if cloud_dt else []
-    for mt in preferred + [t for t in types if t not in preferred]:
+    all_types = list_model_types()
+    preferred = list_model_types(sa_type) if sa_type else []
+    for mt in preferred + [t for t in all_types if t not in preferred]:
         choices[mt] = mt
     return choices
 
@@ -178,7 +184,10 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             username = user_input[CONF_USERNAME].strip()
             password = user_input[CONF_PASSWORD]
             session = async_get_clientsession(self.hass)
-            client = CloudAccount(session, username, password)
+            from .control import async_get_shared_gate
+
+            gate = await async_get_shared_gate(self.hass)
+            client = CloudAccount(session, username, password, gate=gate)
             try:
                 await client.login()
                 devices = await client.async_get_devices()
@@ -221,7 +230,10 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def _async_cloud_client(self) -> CloudAccount | None:
         """Cloud client from in-progress login or existing hub entry."""
+        from .control import async_get_shared_gate
+
         session = async_get_clientsession(self.hass)
+        gate = await async_get_shared_gate(self.hass)
         if self._account and self._password:
             return CloudAccount(
                 session,
@@ -229,6 +241,7 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._password,
                 refresh_token=self._refresh_token,
                 cp_token=self._cp_token,
+                gate=gate,
             )
         hub = _hub_entry(self.hass)
         if not hub:
@@ -239,6 +252,7 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             hub.data.get(CONF_PASSWORD, ""),
             refresh_token=hub.data.get(CONF_REFRESH_TOKEN),
             cp_token=hub.data.get(CONF_CP_TOKEN),
+            gate=gate,
         )
 
     async def _async_build_import_candidates(self) -> dict[str, str]:
@@ -361,12 +375,20 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     f"{cd.model_type or '?'} · {local.host} "
                     f"[{type_name} · {source}]"
                 )
+                sa_type = coalesce_sa_type(
+                    local.sa_type, cd.device_type, default=TYPE_AC
+                )
+                if sa_type is None:
+                    sa_type = TYPE_AC
+                mt = (cd.model_type or "").strip() or None
+                if mt and not model_type_matches_device(mt, sa_type):
+                    mt = None
                 self._import_candidates[mac] = {
                     CONF_HOST: local.host,
                     CONF_NAME: format_local_title(cd.nickname),
                     CONF_INDOOR_MODEL: cd.model or None,
-                    CONF_MODEL_TYPE: cd.model_type or None,
-                    CONF_DEVICE_TYPE: local.sa_type or cd.device_type,
+                    CONF_MODEL_TYPE: mt,
+                    CONF_DEVICE_TYPE: sa_type,
                     "mac": mac,
                     "cloud_only": False,
                     **cloud_fields_from_device(cd),
@@ -440,7 +462,7 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._import_candidates[key] for key in selected
             ]
             return self.async_create_entry(
-                title=f"Panasonic TaiSEIA（{self._account}）",
+                title=f"Panasonic TaiSEIA（{mask_account(self._account)}）",
                 data={
                     CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
                     CONF_USERNAME: self._account,
@@ -482,9 +504,14 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         else:
             self._abort_if_unique_id_configured()
         title = user_input.get(CONF_NAME) or gwid or host
+        sa_type = coalesce_sa_type(
+            user_input.get(CONF_DEVICE_TYPE), default=TYPE_AC
+        )
+        if sa_type is None:
+            sa_type = TYPE_AC
         mt = resolve_model_type(
             user_input.get(CONF_MODEL_TYPE),
-            int(user_input.get(CONF_DEVICE_TYPE) or 1),
+            sa_type,
             None,
         )
         options = {
@@ -513,7 +540,7 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
                 CONF_HOST: host,
                 CONF_NAME: title,
-                CONF_DEVICE_TYPE: int(user_input.get(CONF_DEVICE_TYPE) or 1),
+                CONF_DEVICE_TYPE: sa_type,
                 CONF_UPDATE_INTERVAL: DEFAULT_UPDATE_INTERVAL,
                 CONF_INDOOR_MODEL: user_input.get(CONF_INDOOR_MODEL),
                 CONF_MODEL_TYPE: mt,
@@ -734,11 +761,15 @@ class HubOptionsFlowHandler(config_entries.OptionsFlow):
                 new_data[CONF_PASSWORD] = user_input[CONF_PASSWORD]
             # Re-login if password changed
             if user_input.get(CONF_PASSWORD) or user_input.get("refresh_cloud"):
+                from .control import async_get_shared_gate
+
                 session = async_get_clientsession(self.hass)
+                gate = await async_get_shared_gate(self.hass)
                 cloud = CloudAccount(
                     session,
                     new_data.get(CONF_USERNAME, ""),
                     new_data.get(CONF_PASSWORD, ""),
+                    gate=gate,
                 )
                 try:
                     await cloud.login()
@@ -866,7 +897,13 @@ class DeviceOptionsFlowHandler(config_entries.OptionsFlow):
             interval = int(
                 user_input.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
             )
-            sa_type = int(entry.data.get(CONF_DEVICE_TYPE) or 1)
+            sa_type = coalesce_sa_type(
+                entry.data.get(CONF_DEVICE_TYPE),
+                entry.data.get(CONF_CLOUD_DEVICE_TYPE),
+                default=TYPE_AC,
+            )
+            if sa_type is None:
+                sa_type = TYPE_AC
             mt = resolve_model_type(mt_raw, sa_type, None)
             new_data = dict(entry.data)
             if name:
@@ -976,15 +1013,25 @@ class DeviceOptionsFlowHandler(config_entries.OptionsFlow):
                             max_concurrent=lan_settings.max_concurrent,
                         )
 
-            self.hass.config_entries.async_update_entry(
+            from .entry_helpers import async_update_entry_options
+
+            async_update_entry_options(
+                self.hass,
                 entry,
+                options=new_options,
+                reload=True,
                 data=new_data,
                 title=name or entry.title,
-                options=new_options,
             )
             return self.async_create_entry(title="", data=new_options)
 
-        sa_type = int(entry.data.get(CONF_DEVICE_TYPE) or 1)
+        sa_type = coalesce_sa_type(
+            entry.data.get(CONF_DEVICE_TYPE),
+            entry.data.get(CONF_CLOUD_DEVICE_TYPE),
+            default=TYPE_AC,
+        )
+        if sa_type is None:
+            sa_type = TYPE_AC
         current_mt = (
             entry.data.get(CONF_MODEL_TYPE) or default_model_type(sa_type) or ""
         )

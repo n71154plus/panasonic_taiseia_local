@@ -16,16 +16,14 @@ from .const import (
     DEFAULT_REQUEST_RETRIES,
     DEFAULT_REQUEST_RETRY_DELAY,
     DEFAULT_REQUEST_TIMEOUT,
+    DEVICE_TYPE_NAMES,
     ENTITY_SERVICES_BY_TYPE,
     REG_ALL_STATES,
     REG_MODEL,
     REG_REGISTER,
     REG_SERVICES,
     REG_TYPE_ID,
-    TYPE_AC,
-    TYPE_DEHUMIDIFIER,
     TYPE_REGISTER,
-    TYPE_REFRIGERATOR,
 )
 
 _LOGGER = logging.getLogger(__package__)
@@ -121,7 +119,7 @@ class DeviceInfo:
     mac: str = ""
     brand: str = ""
     sa_model: str = ""
-    sa_type_id: int = TYPE_AC
+    sa_type_id: int = 0
     services: dict[int, ServiceInfo] = field(default_factory=dict)
 
     @property
@@ -372,12 +370,13 @@ class TaiSeiaClient:
     async def async_probe(self) -> DeviceInfo:
         """Validate connectivity and load device metadata + SA type."""
         await self.async_get_device_xml()
-        # Prefer dedicated type-id service
+        # Prefer dedicated type-id service; leave 0 on failure (never guess AC).
         try:
             type_resp = await self.async_read(TYPE_REGISTER, REG_TYPE_ID)
             self.device.sa_type_id = parse_pdu_value(type_resp) & 0xFF
         except TaiSeiaError:
-            self.device.sa_type_id = TYPE_AC
+            self.device.sa_type_id = 0
+            _LOGGER.debug("REG_TYPE_ID failed on %s; SA type left unset", self.host)
 
         reg = await self.async_read(TYPE_REGISTER, REG_REGISTER)
         # brand/model from register
@@ -391,9 +390,9 @@ class TaiSeiaClient:
         except ValueError:
             pass
         # type_id from register header bytes 6-8 if still unknown / zero
-        if self.device.sa_type_id in (0, TYPE_AC) and len(reg) >= 8:
+        if self.device.sa_type_id in (0,) and len(reg) >= 8:
             maybe = (reg[6] << 8) | reg[7]
-            if maybe in (TYPE_AC, TYPE_REFRIGERATOR, TYPE_DEHUMIDIFIER):
+            if maybe in DEVICE_TYPE_NAMES and maybe != 0:
                 self.device.sa_type_id = maybe
         if not self.device.sa_model:
             try:
@@ -423,9 +422,7 @@ class TaiSeiaClient:
 
     async def async_fetch_status(self) -> dict[str, str]:
         """Fetch ALL_STATES and normalize to status dict."""
-        base = ENTITY_SERVICES_BY_TYPE.get(
-            self.device.sa_type_id, ENTITY_SERVICES_BY_TYPE[TYPE_AC]
-        )
+        base = ENTITY_SERVICES_BY_TYPE.get(self.device.sa_type_id, [])
         poll = list(dict.fromkeys([*base, *self.poll_services]))
         try:
             resp = await self.async_read(TYPE_REGISTER, REG_ALL_STATES)
@@ -437,6 +434,9 @@ class TaiSeiaClient:
             _LOGGER.warning("ALL_STATES failed on %s: %s; falling back", self.host, err)
             states = {}
             all_states_ok = False
+            # Cap sequential reads on the failure path (full CommandList is huge).
+            limit = max(len(base), 24) if base else 24
+            poll = poll[:limit]
             for svc in poll:
                 if self.device.services and svc not in self.device.services:
                     continue

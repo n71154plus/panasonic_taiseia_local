@@ -40,12 +40,14 @@ from .const import (
     CONF_INDOOR_MODEL,
     CONF_MODEL_TYPE,
     CONF_UPDATE_INTERVAL,
+    CONF_USERNAME,
     CONTROL_MODE_CLOUD,
     DATA_CLIENT,
     DATA_CONTROL,
     DATA_COORDINATOR,
     DATA_ENERGY,
     DATA_PROFILE,
+    DEFAULT_CONTROL_MODE,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     ENTRY_TYPE_DEVICE,
@@ -70,10 +72,12 @@ from .energy import (
 )
 from .entry_helpers import (
     async_update_entry_data,
+    async_update_entry_options,
     clear_options_snapshot,
     options_changed_since_seed,
     seed_options_snapshot,
 )
+from .flow_helpers import coalesce_sa_type
 from .lan_settings import async_get_lan_settings
 from .naming import async_suggest_name, format_cloud_title, format_local_title, looks_like_module_model
 from .taiseia import ServiceInfo, TaiSeiaClient, configure_lan_concurrency
@@ -120,6 +124,16 @@ async def _async_setup_hub(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     lan = await async_get_lan_settings(hass)
     configure_lan_concurrency(lan.max_concurrent)
     await async_ensure_hub_device(hass, entry)
+
+    # Soft-mask legacy hub titles that still embed the full EMS account.
+    from .naming import mask_account
+
+    username = (entry.data.get(CONF_USERNAME) or "").strip()
+    if username and username in (entry.title or ""):
+        masked_title = f"Panasonic TaiSEIA（{mask_account(username)}）"
+        if entry.title != masked_title:
+            async_update_entry_data(hass, entry, title=masked_title)
+
     hass.data[DOMAIN][entry.entry_id] = {"hub": True}
 
     pending = hass.data[DOMAIN].pop("_pending_imports", None)
@@ -207,16 +221,31 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     lan_ok = False
+    # True only for intentional cloud-only entries (never for temporary LAN outage).
     cloud_only = False
+
+    def _apply_entry_sa_type() -> None:
+        """Seed SA type from entry/cloud metadata without treating 0 as missing.
+
+        When local ``device_type`` and EMS ``cloud_device_type`` disagree, prefer
+        EMS: older builds could persist a wrong local type after a ModelType
+        collision (e.g. washer stored as dehumidifier).
+        """
+        local_t = entry.data.get(CONF_DEVICE_TYPE)
+        cloud_t = entry.data.get(CONF_CLOUD_DEVICE_TYPE)
+        if (
+            local_t not in (None, "")
+            and cloud_t not in (None, "")
+            and int(local_t) != int(cloud_t)
+        ):
+            sa_type = int(cloud_t)
+        else:
+            sa_type = coalesce_sa_type(local_t, cloud_t, default=TYPE_AC)
+        client.device.sa_type_id = sa_type if sa_type is not None else TYPE_AC
 
     if intentionally_cloud:
         cloud_only = True
-        sa_type = int(
-            entry.data.get(CONF_DEVICE_TYPE)
-            or entry.data.get(CONF_CLOUD_DEVICE_TYPE)
-            or TYPE_AC
-        )
-        client.device.sa_type_id = sa_type
+        _apply_entry_sa_type()
         client.device.host = host
         mac = _entry_mac(entry)
         if mac:
@@ -250,18 +279,14 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     err = err2
             if not lan_ok:
                 if entry_has_cloud_creds(entry) or entry.data.get(CONF_CLOUD_GWID):
-                    cloud_only = True
+                    # Temporary LAN outage: keep hybrid/local options; allow later
+                    # recovery. Do NOT flip cloud_only or lock CONTROL_MODE_CLOUD.
                     _LOGGER.warning(
-                        "TaiSEIA %s LAN unreachable (%s); starting cloud-only",
+                        "TaiSEIA %s LAN unreachable (%s); using cloud until LAN recovers",
                         host,
                         err,
                     )
-                    sa_type = int(
-                        entry.data.get(CONF_DEVICE_TYPE)
-                        or entry.data.get(CONF_CLOUD_DEVICE_TYPE)
-                        or TYPE_AC
-                    )
-                    client.device.sa_type_id = sa_type
+                    _apply_entry_sa_type()
                     client.device.host = host
                     mac = _entry_mac(entry)
                     if mac:
@@ -273,16 +298,58 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     raise ConfigEntryNotReady(
                         f"Cannot reach TaiSEIA device at {host}: {err}"
                     ) from err
+        # Probe left type unknown → prefer stored entry/cloud type.
+        if lan_ok and not client.device.sa_type_id:
+            _apply_entry_sa_type()
 
-    # Cloud-only devices are locked to cloud control mode
-    if cloud_only:
+    # Only intentional cloud-only entries are locked to cloud control mode.
+    if intentionally_cloud:
         opts = dict(entry.options)
         if opts.get(CONF_CONTROL_MODE) != CONTROL_MODE_CLOUD:
             opts[CONF_CONTROL_MODE] = CONTROL_MODE_CLOUD
-            hass.config_entries.async_update_entry(entry, options=opts)
+            # Quiet: avoid nested reload while setup is still running.
+            async_update_entry_options(hass, entry, options=opts, reload=False)
 
     new_data = dict(entry.data)
     changed = False
+
+    # Older temporary-LAN-lock bugs could leave cloud_only=True while the host
+    # is still a real LAN IP. Clear that inconsistency; if control_mode was
+    # also forced to cloud by the same bug, restore hybrid. Intentional
+    # cloud-only imports use host 0.0.0.0 and are untouched here.
+    if (
+        not intentionally_cloud
+        and host not in ("", "0.0.0.0")
+        and new_data.get("cloud_only")
+    ):
+        _LOGGER.info(
+            "TaiSEIA %s clearing sticky cloud_only (LAN host present)",
+            host,
+        )
+        new_data["cloud_only"] = False
+        changed = True
+        opts = dict(entry.options)
+        if opts.get(CONF_CONTROL_MODE) == CONTROL_MODE_CLOUD:
+            opts[CONF_CONTROL_MODE] = DEFAULT_CONTROL_MODE
+            async_update_entry_options(hass, entry, options=opts, reload=False)
+            _LOGGER.info(
+                "TaiSEIA %s restored control_mode to %s after sticky cloud-only heal",
+                host,
+                DEFAULT_CONTROL_MODE,
+            )
+
+    # Prefer EMS device type when local type was poisoned.
+    cloud_dt = new_data.get(CONF_CLOUD_DEVICE_TYPE)
+    if (
+        cloud_dt not in (None, "")
+        and new_data.get(CONF_DEVICE_TYPE) not in (None, "")
+        and int(new_data.get(CONF_DEVICE_TYPE)) != int(cloud_dt)
+        and not lan_ok
+    ):
+        new_data[CONF_DEVICE_TYPE] = int(cloud_dt)
+        client.device.sa_type_id = int(cloud_dt)
+        changed = True
+
     if new_data.get(CONF_ENTRY_TYPE) != ENTRY_TYPE_DEVICE:
         new_data[CONF_ENTRY_TYPE] = ENTRY_TYPE_DEVICE
         changed = True
@@ -426,7 +493,10 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         cloud_only=cloud_only,
         lan_ok=lan_ok,
     )
-    cloud_types = default_cloud_command_types(list(client.poll_services or []))
+    cloud_types = default_cloud_command_types(
+        list(client.poll_services or []),
+        sa_type_id=client.device.sa_type_id,
+    )
 
     async def async_update_data():
         nonlocal last_rediscover_mono, lan_ok
@@ -635,6 +705,6 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         data[CONF_ENTRY_TYPE] = (
             ENTRY_TYPE_HUB if CONF_HOST not in data else ENTRY_TYPE_DEVICE
         )
-    hass.config_entries.async_update_entry(entry, data=data, version=2)
+    async_update_entry_data(hass, entry, data=data, version=2)
     _LOGGER.info("Migrated %s to config entry version 2", entry.entry_id)
     return True

@@ -9,6 +9,16 @@ Home Assistant 自訂整合：控制配備 **TaiSEIA** 的 Panasonic 家電，�
 
 ## 更新紀錄
 
+### v1.7.3
+
+- Climate／Humidifier 只依探測到的 SA 類型建立實體
+- 暫時區網失敗不再鎖成僅雲端
+- 雲端 Auth 過期強制刷新；ModelType／DeviceType 守衛更嚴
+- 洗衣機 SP／RPH 別名到 MDH；雲端輪詢優先核心服務
+- README 品類／ModelType 表更新；主設定帳號標題遮罩
+- 升級自動癒合：區網主機上的黏住 cloud-only；優先採 EMS 類型覆蓋錯誤本地類型
+- 探測失敗不再預設成冷氣；區網＋雲端匯入也守衛 ModelType
+
 ### v1.7.2
 
 - 修正洗衣機等機型被誤判成除濕機
@@ -57,23 +67,38 @@ Home Assistant 自訂整合：控制配備 **TaiSEIA** 的 Panasonic 家電，�
 | 品類 | DeviceType | 本套件 | 說明 |
 | --- | --- | --- | --- |
 | **冷氣** | `1` | **可用** | 建議 **混合**，雲端關機可走官方乾燥防霉 |
+| **電冰箱** | `2` | **可用**（多為僅雲端） | 無 climate → CommandList 實體；無 57223 時以「(雲端)」匯入 |
+| **洗衣機** | `3` | **可用** | 無專用 washer 平台 → 依 CommandList 建開關／選項／感測 |
 | **除濕機** | `4` | **可用** | 有開 57223 時同冷氣 |
-| **空氣清淨機** | `8` | **有條件** | LHW／LHW-40 + 57223，或雲端 |
-| **電冰箱** | `2` | **多為僅雲端** | 無 57223 時以「(雲端)」匯入 |
-| 其他 | … | 有限 | EMS 有清單才可雲端；有 57223 才可本地 |
+| **乾衣機** | `6` | **可用** | CommandList（App 目錄有 `CN-HP`／`HP`） |
+| **空氣清淨機** | `8` | **可用** | LHW／LHW-40／MH + 57223，或雲端 |
+| **全熱交換器** | `14` | **可用** | CommandList（`FYZY`） |
+| **智慧／調光開關** | `17` | **可用** | `WTY`／`WTYF` |
+| **重量檢知盤** | `23` | **可用** | `PZE1` |
+| **住空間控制器** | `24` | **有限** | `CSC`（指令很少） |
 
-### 冷氣／除濕 ModelType
+雲端每次 GetInfo 最多送 **24** 個指令型別（優先核心實體服務）。沒有專用 HA 平台的品類仍可透過 CommandList 實體控制。
 
-| 品類 | 平台 | ModelType（不確定用粗體） |
+### ModelType（App CommandList）
+
+| 品類 | HA 平台 | ModelType（不確定用粗體） |
 | --- | --- | --- |
 | 冷氣 | `climate` 等 | GX、J、J-DUCT、LJ、LJV、LX、PU、PX、**PXGD**、QX、RX-N、SX-DUCT、UJ、UX、VX |
+| 電冰箱 | 實體 | **F657** |
+| 洗衣機 | 實體 | DDH、DW、HDH、KBS、LX128B、**MDH**；**SP**／**RPH** 別名 → MDH（App 無獨立 JSON） |
 | 除濕 | `humidifier` 等 | CXW、EHW、GHW、JHV2、**JHW**、LXW、MHW、NHW、NNW、NNW-L、NXW |
+| 乾衣機 | 實體 | **CN-HP**、HP |
+| 空氣清淨機 | 實體 | **LHW**、LHW-40、MH |
+| 全熱交換器 | 實體 | **FYZY** |
+| 智慧／調光開關 | 實體 | **WTY**、WTYF |
+| 重量檢知盤 | 實體 | **PZE1** |
+| 住空間控制器 | 實體 | **CSC** |
 
 可在裝置選項覆寫 ModelType。
 
 ## 功能
 
-- climate／humidifier 與感測、開關、選項、數值、按鈕等（CommandList）
+- climate／humidifier（冷氣／除濕）；其他品類依 CommandList 建感測／開關／選項／數值／按鈕
 - 控制路徑：混合／僅本地／僅雲端
 - SSDP + LAN 發現；EMS 匯入（區網＋僅雲端）
 - 可選耗電感測器

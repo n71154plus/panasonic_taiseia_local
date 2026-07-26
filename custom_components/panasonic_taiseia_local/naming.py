@@ -122,3 +122,20 @@ def format_local_title(nickname: str, type_name: str | None = None) -> str:
 def format_cloud_title(nickname: str) -> str:
     """Cloud-only device title with (雲端)."""
     return format_device_title(nickname, cloud_only=True)
+
+
+def mask_account(username: str | None) -> str:
+    """Mask EMS account for hub titles (avoid full email in the UI)."""
+    raw = (username or "").strip()
+    if not raw:
+        return "帳號"
+    if "@" in raw:
+        local, _, domain = raw.partition("@")
+        if not domain:
+            return f"{local[0]}***" if local else "***"
+        if len(local) <= 1:
+            return f"*@{domain}"
+        return f"{local[0]}***@{domain}"
+    if len(raw) <= 2:
+        return "***"
+    return f"{raw[:2]}***"

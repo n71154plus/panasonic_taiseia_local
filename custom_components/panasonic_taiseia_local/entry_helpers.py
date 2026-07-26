@@ -42,8 +42,9 @@ def async_update_entry_data(
     *,
     data: dict[str, Any] | None = None,
     title: str | None = None,
+    version: int | None = None,
 ) -> None:
-    """Persist entry data/title without intending an options-driven reload.
+    """Persist entry data/title/version without intending an options-driven reload.
 
     Relies on ``async_reload_entry`` only reloading when options change.
     """
@@ -52,8 +53,40 @@ def async_update_entry_data(
         kwargs["data"] = data
     if title is not None:
         kwargs["title"] = title
+    if version is not None:
+        kwargs["version"] = version
     if not kwargs:
         return
     # Ensure snapshot exists so data-only updates are ignored by the listener.
     seed_options_snapshot(hass, entry)
+    hass.config_entries.async_update_entry(entry, **kwargs)
+
+
+def async_update_entry_options(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    *,
+    options: dict[str, Any],
+    reload: bool = True,
+    data: dict[str, Any] | None = None,
+    title: str | None = None,
+) -> None:
+    """Persist options; ``reload=True`` lets the update listener reload the entry.
+
+    Use ``reload=False`` during setup (e.g. lock cloud control mode) so nested
+    unload/reload does not race the current setup.
+    """
+    kwargs: dict[str, Any] = {"options": options}
+    if data is not None:
+        kwargs["data"] = data
+    if title is not None:
+        kwargs["title"] = title
+    if reload:
+        # Drop snapshot so options_changed_since_seed sees a real change.
+        clear_options_snapshot(hass, entry.entry_id)
+    else:
+        # Pretend we are already at the target options → listener skips reload.
+        domain = hass.data.setdefault(DOMAIN, {})
+        snaps = domain.setdefault(_OPTIONS_SNAPSHOT, {})
+        snaps[entry.entry_id] = dict(options)
     hass.config_entries.async_update_entry(entry, **kwargs)

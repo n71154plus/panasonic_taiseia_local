@@ -48,9 +48,9 @@ async def async_setup_entry(hass, entry, async_add_entities) -> bool:
     client = hass.data[DOMAIN][entry.entry_id][DATA_CLIENT]
     coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
     profile = hass.data[DOMAIN][entry.entry_id].get(DATA_PROFILE)
-    if client.device.sa_type_id != TYPE_DEHUMIDIFIER and not (
-        profile and profile.device_type == 4
-    ):
+    # Only the probed / entry SA type decides humidifier — never trust catalog
+    # DeviceType alone (wrong ModelType must not create a dehumidifier).
+    if client.device.sa_type_id != TYPE_DEHUMIDIFIER:
         return True
     async_add_entities(
         [TaiSeiaDehumidifier(coordinator, client, entry.entry_id, profile)],

@@ -9,6 +9,16 @@ Home Assistant custom integration for **Panasonic TaiSEIA** appliances — **LAN
 
 ## Changelog
 
+### v1.7.3
+
+- Platform entities only follow probed SA type (not catalog profile)
+- Temporary LAN outage no longer locks devices into cloud-only
+- Cloud auth retry on expiry; ModelType / DeviceType guards tightened
+- SP/RPH washer ModelTypes alias to MDH; cloud poll prioritizes core services
+- README appliance / ModelType tables updated; hub account title masked
+- Upgrade heals: sticky cloud-only on LAN hosts; prefer EMS type over poisoned local type
+- Probe no longer defaults unknown SA type to AC; import ModelType guarded for LAN+cloud match
+
 ### v1.7.2
 
 - Fix washing machines (and other types) being misidentified as dehumidifiers
@@ -58,25 +68,38 @@ You can keep the official app and other HA cloud integrations. Prefer **not** ha
 | Class | DeviceType | Supported? | Notes |
 | --- | --- | --- | --- |
 | **Air conditioner** | `1` | **Yes** | Prefer **hybrid** so cloud OFF can trigger official 乾燥防霉 |
+| **Refrigerator** | `2` | **Yes** (typical cloud-only) | `climate` N/A → CommandList entities; import as **(雲端)** when no `57223` |
+| **Washer** | `3` | **Yes** | No dedicated washer platform → switches/selects/sensors from CommandList |
 | **Dehumidifier** | `4` | **Yes** | Same as AC when LAN is open |
-| **Air cleaner** | `8` | **Conditional** | LHW / LHW-40 + open `57223`, or cloud if available |
-| **Refrigerator** | `2` | **Cloud-only** (typical) | Import as **(雲端)** when there is no `57223` |
-| Washer / dryer / others | … | Limited | Cloud if in EMS list; LAN only if `57223` exists |
+| **Dryer** | `6` | **Yes** | CommandList entities (`CN-HP` / `HP` from App catalog) |
+| **Air cleaner** | `8` | **Yes** | LHW / LHW-40 / MH + open `57223`, or cloud |
+| **ERV** | `14` | **Yes** | CommandList entities (`FYZY`) |
+| **Smart / dimmer switch** | `17` | **Yes** | `WTY` / `WTYF` |
+| **Weight plate** | `23` | **Yes** | `PZE1` |
+| **Living-space controller** | `24` | **Limited** | `CSC` (very small CommandList) |
 
-### AC / dehumidifier ModelTypes
+Cloud polling sends up to **24** command types per GetInfo call (core entity services first). Types without a dedicated HA platform still work via generic CommandList entities.
 
-Built-in App **CommandList** platforms:
+### ModelTypes (App CommandList)
 
-| Class | Platform | ModelTypes (bold = default when unsure) |
+| Class | HA platform | ModelTypes (bold = default when unsure) |
 | --- | --- | --- |
 | AC | `climate` + … | GX, J, J-DUCT, LJ, LJV, LX, PU, PX, **PXGD**, QX, RX-N, SX-DUCT, UJ, UX, VX |
+| Refrigerator | entities | **F657** |
+| Washer | entities | DDH, DW, HDH, KBS, LX128B, **MDH**; **SP** / **RPH** alias → MDH (no separate App JSON) |
 | Dehumidifier | `humidifier` + … | CXW, EHW, GHW, JHV2, **JHW**, LXW, MHW, NHW, NNW, NNW-L, NXW |
+| Dryer | entities | **CN-HP**, HP |
+| Air cleaner | entities | **LHW**, LHW-40, MH |
+| ERV | entities | **FYZY** |
+| Switch / dimmer | entities | **WTY**, WTYF |
+| Weight plate | entities | **PZE1** |
+| Living-space controller | entities | **CSC** |
 
 Override ModelType in device options.
 
 ## Features
 
-- **climate** / **humidifier** plus sensors, binary sensors, switches, selects, numbers, buttons (CommandList)
+- **climate** / **humidifier** for AC / dehumidifier; other classes use CommandList sensors / switches / selects / numbers / buttons
 - Control modes: **hybrid** / **local** / **cloud**
 - SSDP + LAN `57223` discovery; EMS import (LAN + cloud-only)
 - Optional energy sensors (period / total / house)

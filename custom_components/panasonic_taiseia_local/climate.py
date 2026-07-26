@@ -64,7 +64,9 @@ async def async_setup_entry(hass, entry, async_add_entities) -> bool:
     client = hass.data[DOMAIN][entry.entry_id][DATA_CLIENT]
     coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
     profile = hass.data[DOMAIN][entry.entry_id].get(DATA_PROFILE)
-    if client.device.sa_type_id != TYPE_AC and not (profile and profile.device_type == 1):
+    # Only the probed / entry SA type decides climate — never trust catalog
+    # DeviceType alone (wrong ModelType must not create a climate entity).
+    if client.device.sa_type_id != TYPE_AC:
         return True
     async_add_entities(
         [TaiSeiaClimate(coordinator, client, entry.entry_id, profile)],

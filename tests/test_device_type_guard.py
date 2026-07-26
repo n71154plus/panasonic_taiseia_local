@@ -96,8 +96,9 @@ class ResolveModelTypeGuardTest(unittest.TestCase):
         self.assertTrue(model_type_matches_device("MDH", TYPE_WASHING_MACHINE))
         self.assertTrue(model_type_matches_device("HDH", TYPE_WASHING_MACHINE))
         self.assertFalse(model_type_matches_device("not-a-code", TYPE_AC))
-        # Unknown SA type (0) cannot be verified → accept catalog codes.
-        self.assertTrue(model_type_matches_device("JHW", 0))
+        # Unknown SA type (0) must refuse catalog codes (would guess wrong).
+        self.assertFalse(model_type_matches_device("JHW", 0))
+        self.assertFalse(model_type_matches_device("MDH", 0))
 
 
 class WashingMachineProfileTest(unittest.TestCase):

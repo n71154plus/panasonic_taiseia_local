@@ -94,6 +94,13 @@ _DEFAULT_MODEL_TYPE = {
     TYPE_LIVING_SPACE_CONTROLLER: "CSC",
 }
 
+# App UI ModelTypes with no standalone CommandList JSON → reuse a close catalog.
+# SP / RPH appear in washer_tw activities; official list ships MDH/HDH/….
+_MODEL_TYPE_ALIASES = {
+    "SP": "MDH",
+    "RPH": "MDH",
+}
+
 _HVAC_NAME_MAP = {
     "冷氣": HVACMode.COOL,
     "制冷": HVACMode.COOL,
@@ -220,6 +227,16 @@ def load_catalog() -> dict[str, dict[str, Any]]:
             "DeviceName": str(block.get("DeviceName") or ""),
             "ProtocalType": str(block.get("ProtocalType") or ""),
             "commands": cmds,
+        }
+    for alias, target in _MODEL_TYPE_ALIASES.items():
+        if alias in catalog or target not in catalog:
+            continue
+        base = catalog[target]
+        catalog[alias] = {
+            **base,
+            "ModelType": alias,
+            "commands": list(base["commands"]),
+            "alias_of": target,
         }
     _CATALOG = catalog
     _LOGGER.debug("Loaded CommandList: %s ModelTypes", len(catalog))
@@ -618,9 +635,10 @@ def model_type_matches_device(model_type: str | None, sa_type_id: int) -> bool:
     info = load_catalog().get(model_type)
     if not info:
         return False
-    # Unknown SA type (0) → cannot verify, accept.
+    # Unknown SA type (0): refuse catalog codes — they may belong to any
+    # appliance and would create the wrong entity set.
     if not sa_type_id:
-        return True
+        return False
     return int(info["DeviceType"]) == int(sa_type_id)
 
 

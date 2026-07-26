@@ -33,6 +33,7 @@ from .const import (
     DATA_EMS_GATE,
     DEFAULT_CONTROL_MODE,
     DOMAIN,
+    ENTITY_SERVICES_BY_TYPE,
     ENTRY_TYPE_HUB,
 )
 from .ems_transport import EmsGate, EmsSettings, RequestPriority
@@ -104,22 +105,28 @@ async def async_get_cloud_account(
 
 
 async def async_refresh_cloud_auth(
-    hass: HomeAssistant, entry: ConfigEntry
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    *,
+    force: bool = False,
 ) -> tuple[str, str] | None:
-    """Return (gwid, auth), refreshing Auth from hub GwList if needed."""
+    """Return (gwid, auth), refreshing Auth from hub GwList if needed.
+
+    When ``force`` is True (e.g. after CloudAuthError), always re-fetch GwList
+    even if a cached Auth is present — Auth tokens can rotate.
+    """
     gwid = (entry.data.get(CONF_CLOUD_GWID) or "").strip()
     auth = (entry.data.get(CONF_CLOUD_AUTH) or "").strip()
-    if gwid and auth:
+    if gwid and auth and not force:
         return gwid, auth
     cloud = await async_get_cloud_account(hass, entry)
     if cloud is None:
-        return None
+        return (gwid, auth) if gwid and auth else None
     try:
         devices = await cloud.async_get_devices()
     except Exception as err:  # noqa: BLE001
         _LOGGER.debug("refresh cloud auth failed: %s", err)
-        return None
-    # Persist tokens if refreshed
+        return (gwid, auth) if gwid and auth and not force else None
     hub = _hub_entry(hass, entry)
     if hub is not None and (cloud.cp_token or cloud.refresh_token):
         new_hub = dict(hub.data)
@@ -137,7 +144,7 @@ async def async_refresh_cloud_auth(
         if len(mac) == 12:
             match = next((d for d in devices if (d.mac or "").upper() == mac), None)
     if match is None or not match.auth:
-        return (gwid, auth) if gwid and auth else None
+        return (gwid, auth) if gwid and auth and not force else None
     new_data = dict(entry.data)
     new_data[CONF_CLOUD_GWID] = match.gwid
     new_data[CONF_CLOUD_AUTH] = match.auth
@@ -165,9 +172,22 @@ class DeviceControl:
         self.lan_ok = lan_ok
         self.last_path: str | None = None
         self._cloud: CloudAccount | None = None
+        self._cloud_key: tuple[Any, ...] | None = None
 
     def _live_entry(self) -> ConfigEntry:
         return self.hass.config_entries.async_get_entry(self.entry_id) or self.entry
+
+    def _hub_cred_key(self) -> tuple[Any, ...] | None:
+        hub = _hub_entry(self.hass, self._live_entry())
+        if hub is None:
+            return None
+        return (
+            hub.entry_id,
+            hub.data.get(CONF_USERNAME),
+            hub.data.get(CONF_PASSWORD),
+            hub.data.get(CONF_CP_TOKEN),
+            hub.data.get(CONF_REFRESH_TOKEN),
+        )
 
     @property
     def mode(self) -> str:
@@ -181,24 +201,40 @@ class DeviceControl:
         return entry_has_cloud_creds(live) or bool(live.data.get(CONF_CLOUD_GWID))
 
     async def _cloud_account(self) -> CloudAccount | None:
-        if self._cloud is None:
+        key = self._hub_cred_key()
+        if self._cloud is None or self._cloud_key != key:
             self._cloud = await async_get_cloud_account(self.hass, self._live_entry())
+            self._cloud_key = key
         return self._cloud
 
-    async def async_write(self, service: int, value: int) -> str:
-        """Write one TaiSEIA service; return path used ('cloud'|'lan')."""
-        mode = self.mode
-        errors: list[str] = []
+    async def _persist_hub_tokens(self, live: ConfigEntry, cloud: CloudAccount) -> None:
+        hub = _hub_entry(self.hass, live)
+        if hub is None:
+            return
+        new_hub = dict(hub.data)
+        changed = False
+        if cloud.cp_token and new_hub.get(CONF_CP_TOKEN) != cloud.cp_token:
+            new_hub[CONF_CP_TOKEN] = cloud.cp_token
+            changed = True
+        if (
+            cloud.refresh_token
+            and new_hub.get(CONF_REFRESH_TOKEN) != cloud.refresh_token
+        ):
+            new_hub[CONF_REFRESH_TOKEN] = cloud.refresh_token
+            changed = True
+        if changed:
+            async_update_entry_data(self.hass, hub, data=new_hub)
 
-        async def _cloud() -> None:
-            live = self._live_entry()
-            creds = await async_refresh_cloud_auth(self.hass, live)
-            if not creds:
-                raise CloudApiError("missing cloud GWID/Auth")
-            gwid, auth = creds
-            cloud = await self._cloud_account()
-            if cloud is None:
-                raise CloudApiError("no hub cloud account")
+    async def _cloud_write(self, service: int, value: int) -> None:
+        live = self._live_entry()
+        creds = await async_refresh_cloud_auth(self.hass, live)
+        if not creds:
+            raise CloudApiError("missing cloud GWID/Auth")
+        gwid, auth = creds
+        cloud = await self._cloud_account()
+        if cloud is None:
+            raise CloudApiError("no hub cloud account")
+        try:
             await cloud.async_set_command(
                 auth=auth,
                 gwid=gwid,
@@ -206,22 +242,60 @@ class DeviceControl:
                 value=value,
                 priority=RequestPriority.USER,
             )
-            # Persist refreshed tokens
-            hub = _hub_entry(self.hass, live)
-            if hub is not None:
-                new_hub = dict(hub.data)
-                changed = False
-                if cloud.cp_token and new_hub.get(CONF_CP_TOKEN) != cloud.cp_token:
-                    new_hub[CONF_CP_TOKEN] = cloud.cp_token
-                    changed = True
-                if (
-                    cloud.refresh_token
-                    and new_hub.get(CONF_REFRESH_TOKEN) != cloud.refresh_token
-                ):
-                    new_hub[CONF_REFRESH_TOKEN] = cloud.refresh_token
-                    changed = True
-                if changed:
-                    async_update_entry_data(self.hass, hub, data=new_hub)
+        except CloudAuthError:
+            creds = await async_refresh_cloud_auth(self.hass, live, force=True)
+            if not creds:
+                raise
+            gwid, auth = creds
+            await cloud.async_set_command(
+                auth=auth,
+                gwid=gwid,
+                command_type=command_type_hex(service),
+                value=value,
+                priority=RequestPriority.USER,
+            )
+        await self._persist_hub_tokens(live, cloud)
+
+    async def _cloud_status(
+        self, command_types: list[str] | None
+    ) -> dict[str, Any]:
+        live = self._live_entry()
+        creds = await async_refresh_cloud_auth(self.hass, live)
+        if not creds:
+            raise CloudApiError("missing cloud GWID/Auth")
+        gwid, auth = creds
+        cloud = await self._cloud_account()
+        if cloud is None:
+            raise CloudApiError("no hub cloud account")
+        types = command_types or [
+            command_type_hex(sid)
+            for sid in (self.client.poll_services or [0, 1, 3, 4])
+        ]
+        # EMS GetInfo caps; prefer caller-provided prioritized list.
+        types = types[:24]
+        try:
+            return await cloud.async_get_device_info(
+                auth=auth,
+                gwid=gwid,
+                command_types=types,
+                priority=RequestPriority.BACKGROUND,
+            )
+        except CloudAuthError:
+            creds = await async_refresh_cloud_auth(self.hass, live, force=True)
+            if not creds:
+                raise
+            gwid, auth = creds
+            return await cloud.async_get_device_info(
+                auth=auth,
+                gwid=gwid,
+                command_types=types,
+                priority=RequestPriority.BACKGROUND,
+            )
+
+    async def async_write(self, service: int, value: int) -> str:
+        """Write one TaiSEIA service; return path used ('cloud'|'lan')."""
+        mode = self.mode
+        errors: list[str] = []
 
         async def _lan() -> None:
             await self.client.async_write_device(service, value)
@@ -234,21 +308,24 @@ class DeviceControl:
             return "lan"
 
         if mode == CONTROL_MODE_CLOUD:
-            await _cloud()
+            await self._cloud_write(service, value)
             self.last_path = "cloud"
             return "cloud"
 
         # hybrid: cloud first, LAN assist
         if self.can_use_cloud():
             try:
-                await _cloud()
+                await self._cloud_write(service, value)
                 self.last_path = "cloud"
                 return "cloud"
-            except (CloudRateLimited, CloudDeviceOffline, CloudAuthError, CloudApiError) as err:
+            except (
+                CloudRateLimited,
+                CloudDeviceOffline,
+                CloudAuthError,
+                CloudApiError,
+            ) as err:
                 errors.append(f"cloud:{err}")
-                _LOGGER.info(
-                    "hybrid write cloud failed (%s); trying LAN", err
-                )
+                _LOGGER.info("hybrid write cloud failed (%s); trying LAN", err)
         if self.can_use_lan():
             try:
                 await _lan()
@@ -269,38 +346,17 @@ class DeviceControl:
         async def _lan() -> dict[str, Any]:
             return await self.client.async_fetch_status()
 
-        async def _cloud() -> dict[str, Any]:
-            live = self._live_entry()
-            creds = await async_refresh_cloud_auth(self.hass, live)
-            if not creds:
-                raise CloudApiError("missing cloud GWID/Auth")
-            gwid, auth = creds
-            cloud = await self._cloud_account()
-            if cloud is None:
-                raise CloudApiError("no hub cloud account")
-            types = command_types or [
-                command_type_hex(sid) for sid in (self.client.poll_services or [0, 1, 3, 4])
-            ]
-            # Cap batch size to reduce EMS load
-            types = types[:24]
-            return await cloud.async_get_device_info(
-                auth=auth,
-                gwid=gwid,
-                command_types=types,
-                priority=RequestPriority.BACKGROUND,
-            )
-
         if mode == CONTROL_MODE_LOCAL:
             status = await _lan()
             self.last_path = "lan"
             return status, "lan"
 
         if mode == CONTROL_MODE_CLOUD:
-            status = await _cloud()
+            status = await self._cloud_status(command_types)
             self.last_path = "cloud"
             return status, "cloud"
 
-        # hybrid: LAN first
+        # hybrid: LAN first, cloud assist
         if self.can_use_lan():
             try:
                 status = await _lan()
@@ -309,9 +365,10 @@ class DeviceControl:
             except Exception as err:  # noqa: BLE001
                 errors.append(f"lan:{err}")
                 _LOGGER.debug("hybrid read LAN failed (%s); trying cloud", err)
+                self.lan_ok = False
         if self.can_use_cloud():
             try:
-                status = await _cloud()
+                status = await self._cloud_status(command_types)
                 self.last_path = "cloud"
                 return status, "cloud"
             except Exception as err:  # noqa: BLE001
@@ -320,6 +377,21 @@ class DeviceControl:
         raise CloudApiError("; ".join(errors) or "no read path available")
 
 
-def default_cloud_command_types(profile_service_ids: list[int] | None) -> list[str]:
-    ids = profile_service_ids or [0x00, 0x01, 0x02, 0x03, 0x04, 0x0F, 0x17]
-    return [command_type_hex(i) for i in ids]
+def default_cloud_command_types(
+    profile_service_ids: list[int] | None,
+    *,
+    sa_type_id: int | None = None,
+    limit: int = 24,
+) -> list[str]:
+    """Build EMS GetInfo command types; core entity services first, then the rest.
+
+    EMS accepts a limited list per request (~24). Prefer ``ENTITY_SERVICES_BY_TYPE``
+    so cloud-only washers/dryers keep status/controls instead of being truncated
+    to whatever happens to sit at the front of the full CommandList.
+    """
+    preferred = list(ENTITY_SERVICES_BY_TYPE.get(int(sa_type_id or 0), []))
+    rest = list(profile_service_ids or [])
+    ids = list(dict.fromkeys([*preferred, *rest]))
+    if not ids:
+        ids = [0x00, 0x01, 0x02, 0x03, 0x04, 0x0F, 0x17]
+    return [command_type_hex(i) for i in ids[: max(1, int(limit))]]

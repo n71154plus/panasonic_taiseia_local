@@ -21,6 +21,7 @@ from .const import (
     CONF_CLOUD_MODEL_TYPE,
     CONF_CLOUD_NICKNAME,
     CONF_CP_TOKEN,
+    CONF_DEVICE_TYPE,
     CONF_ENTRY_TYPE,
     CONF_INDOOR_MODEL,
     CONF_MODEL_TYPE,
@@ -53,12 +54,34 @@ def merge_cloud_into_entry_data(
     data: dict[str, Any], cd: CloudDevice, *, update_name: bool = True
 ) -> dict[str, Any]:
     """Return updated entry data with cloud metadata."""
+    from .catalog import model_type_matches_device
+    from .flow_helpers import coalesce_sa_type
+
     out = dict(data)
     out.update(cloud_fields_from_device(cd))
+    # Heal poisoned local device_type from EMS (authoritative when present).
+    if cd.device_type and out.get(CONF_DEVICE_TYPE) not in (None, ""):
+        if int(out.get(CONF_DEVICE_TYPE)) != int(cd.device_type):
+            out[CONF_DEVICE_TYPE] = int(cd.device_type)
+    elif cd.device_type and out.get(CONF_DEVICE_TYPE) in (None, ""):
+        out[CONF_DEVICE_TYPE] = int(cd.device_type)
     if cd.model and not out.get(CONF_INDOOR_MODEL):
         out[CONF_INDOOR_MODEL] = cd.model
+    # Drop ModelType that conflicts with the (possibly healed) SA type.
+    sa_type = coalesce_sa_type(
+        out.get(CONF_DEVICE_TYPE),
+        out.get(CONF_CLOUD_DEVICE_TYPE),
+        cd.device_type,
+        default=0,
+    )
+    if sa_type is None:
+        sa_type = 0
+    stored_mt = out.get(CONF_MODEL_TYPE)
+    if stored_mt and not model_type_matches_device(stored_mt, sa_type):
+        out.pop(CONF_MODEL_TYPE, None)
     if cd.model_type and not out.get(CONF_MODEL_TYPE):
-        out[CONF_MODEL_TYPE] = cd.model_type
+        if model_type_matches_device(cd.model_type, sa_type):
+            out[CONF_MODEL_TYPE] = cd.model_type
     if update_name and cd.nickname:
         cloud_only = bool(out.get("cloud_only")) or (
             str(out.get("host") or "") in ("", "0.0.0.0")
@@ -88,13 +111,15 @@ def hub_device_identifier(entry: ConfigEntry) -> tuple[str, str]:
 async def async_ensure_hub_device(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> dr.DeviceEntry:
+    from .naming import mask_account
+
     registry = dr.async_get(hass)
     username = entry.data.get(CONF_USERNAME) or "Panasonic"
     return registry.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={hub_device_identifier(entry)},
         manufacturer=MANUFACTURER,
-        name=entry.title or f"Panasonic TaiSEIA（{username}）",
+        name=entry.title or f"Panasonic TaiSEIA（{mask_account(username)}）",
         model="主設定 · EMS 帳號",
         configuration_url="https://ems2.panasonic.com.tw/",
     )
@@ -110,13 +135,17 @@ def _mac_key(value: str | None) -> str | None:
 async def async_fetch_cloud_devices(
     hass: HomeAssistant, hub: ConfigEntry
 ) -> list[CloudDevice]:
+    from .control import async_get_shared_gate
+
     session = async_get_clientsession(hass)
+    gate = await async_get_shared_gate(hass)
     cloud = CloudAccount(
         session,
         hub.data.get(CONF_USERNAME, ""),
         hub.data.get(CONF_PASSWORD, ""),
         refresh_token=hub.data.get(CONF_REFRESH_TOKEN),
         cp_token=hub.data.get(CONF_CP_TOKEN),
+        gate=gate,
     )
     devices = await cloud.async_get_devices()
     new_data = dict(hub.data)
