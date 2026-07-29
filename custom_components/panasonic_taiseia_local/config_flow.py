@@ -132,6 +132,40 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._refresh_token: str | None = None
         self._import_candidates: dict[str, dict[str, Any]] = {}
 
+    def _upgrade_existing_to_lan(
+        self, *, host: str, mac: str | None
+    ) -> None:
+        """If unique_id exists as cloud-only, attach LAN host and unlock control.
+
+        Always ends in ``_abort_if_unique_id_configured`` when an entry matches.
+        """
+        updates: dict[str, Any] = {
+            CONF_HOST: host,
+            "cloud_only": False,
+        }
+        if mac:
+            updates["mac"] = mac
+        # Restore hybrid when a prior cloud-only lock forced CONTROL_MODE_CLOUD.
+        for existing in self._async_current_entries():
+            if existing.unique_id != self.unique_id:
+                continue
+            was_cloud_only = bool(existing.data.get("cloud_only")) or (
+                str(existing.data.get(CONF_HOST) or "") in ("", "0.0.0.0")
+            )
+            if (
+                was_cloud_only
+                and existing.options.get(CONF_CONTROL_MODE) == CONTROL_MODE_CLOUD
+            ):
+                self.hass.config_entries.async_update_entry(
+                    existing,
+                    options={
+                        **dict(existing.options),
+                        CONF_CONTROL_MODE: DEFAULT_CONTROL_MODE,
+                    },
+                )
+            break
+        self._abort_if_unique_id_configured(updates=updates)
+
     @staticmethod
     @callback
     def async_get_options_flow(config_entry: ConfigEntry):
@@ -667,7 +701,10 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(
             device.mac.lower() if device.mac else device.host
         )
-        self._abort_if_unique_id_configured(updates={CONF_HOST: host})
+        self._upgrade_existing_to_lan(
+            host=host,
+            mac=(device.mac or "").upper() or None,
+        )
         self.context["title_placeholders"] = {"name": device.label}
         self._discovered = {(device.mac or host).lower(): device}
         return await self.async_step_discover_confirm()
@@ -708,7 +745,11 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         uid = (device.mac or f"{device.host}:{device.port}").lower()
         await self.async_set_unique_id(uid)
-        self._abort_if_unique_id_configured(updates={CONF_HOST: device.host})
+        # Re-adding a previously cloud-only MAC with a working LAN host upgrades it.
+        self._upgrade_existing_to_lan(
+            host=device.host,
+            mac=(device.mac or "").upper() or None,
+        )
         type_name = DEVICE_TYPE_NAMES.get(device.sa_type, "")
         manual = (name or "").strip()
         indoor = (indoor_model or "").strip() or None
@@ -882,6 +923,125 @@ class HubOptionsFlowHandler(config_entries.OptionsFlow):
 class DeviceOptionsFlowHandler(config_entries.OptionsFlow):
     """Per-device options. Shared LAN/energy only if no hub entry exists."""
 
+    def _device_is_cloud_only(self, entry: ConfigEntry) -> bool:
+        slot = (self.hass.data.get(DOMAIN) or {}).get(entry.entry_id) or {}
+        coord = slot.get(DATA_COORDINATOR)
+        cloud_only = bool(
+            coord and (getattr(coord, "data", None) or {}).get("cloud_only")
+        )
+        if cloud_only:
+            return True
+        if bool(entry.data.get("cloud_only")):
+            return True
+        host = (entry.data.get(CONF_HOST) or "").strip()
+        if (
+            entry.data.get(CONF_CLOUD_GWID)
+            and entry.data.get(CONF_CLOUD_AUTH)
+            and host in ("", "0.0.0.0")
+        ):
+            return True
+        return False
+
+    def _device_options_schema(
+        self,
+        entry: ConfigEntry,
+        *,
+        has_hub: bool,
+        energy: Any,
+        lan: Any,
+    ) -> vol.Schema:
+        sa_type = coalesce_sa_type(
+            entry.data.get(CONF_DEVICE_TYPE),
+            entry.data.get(CONF_CLOUD_DEVICE_TYPE),
+            default=TYPE_AC,
+        )
+        if sa_type is None:
+            sa_type = TYPE_AC
+        current_mt = (
+            entry.data.get(CONF_MODEL_TYPE) or default_model_type(sa_type) or ""
+        )
+        opts = entry.options
+        host_default = (entry.data.get(CONF_HOST) or "").strip()
+        if host_default == "0.0.0.0":
+            host_default = ""
+        schema: dict[Any, Any] = {
+            vol.Optional(
+                CONF_NAME,
+                default=entry.data.get(CONF_NAME) or entry.title or "",
+            ): str,
+            vol.Optional(CONF_HOST, default=host_default): str,
+            vol.Optional(
+                CONF_INDOOR_MODEL,
+                default=entry.data.get(CONF_INDOOR_MODEL) or "",
+            ): str,
+            vol.Optional(CONF_MODEL_TYPE, default=current_mt): vol.In(
+                _model_type_choices(sa_type)
+            ),
+            vol.Optional(
+                CONF_UPDATE_INTERVAL,
+                default=opts.get(
+                    CONF_UPDATE_INTERVAL,
+                    entry.data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
+                ),
+            ): vol.All(vol.Coerce(int), vol.Range(min=10, max=600)),
+            vol.Optional(
+                CONF_ENERGY_ENABLED,
+                default=opts.get(CONF_ENERGY_ENABLED, True),
+            ): bool,
+            vol.Optional(
+                CONF_ENERGY_INCLUDE_HOUSE,
+                default=opts.get(CONF_ENERGY_INCLUDE_HOUSE, True),
+            ): bool,
+            vol.Optional(CONF_ENERGY_RESET_PERIOD, default=False): bool,
+            vol.Optional(CONF_ENERGY_RESET_TOTAL, default=False): bool,
+        }
+        cloud_only = self._device_is_cloud_only(entry)
+        if cloud_only:
+            # Still show the dropdown (cloud only) — unlock by filling Host IP.
+            schema[
+                vol.Optional(
+                    CONF_CONTROL_MODE,
+                    default=CONTROL_MODE_CLOUD,
+                )
+            ] = vol.In({CONTROL_MODE_CLOUD: CONTROL_MODE_OPTIONS[CONTROL_MODE_CLOUD]})
+        else:
+            schema[
+                vol.Optional(
+                    CONF_CONTROL_MODE,
+                    default=opts.get(CONF_CONTROL_MODE, DEFAULT_CONTROL_MODE),
+                )
+            ] = vol.In(CONTROL_MODE_OPTIONS)
+        if not has_hub:
+            schema.update(
+                {
+                    vol.Optional(
+                        CONF_REQUEST_TIMEOUT, default=lan.timeout
+                    ): vol.All(vol.Coerce(float), vol.Range(min=2, max=60)),
+                    vol.Optional(
+                        CONF_REQUEST_RETRIES, default=lan.retries
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=10)),
+                    vol.Optional(
+                        CONF_REQUEST_RETRY_DELAY, default=lan.retry_delay
+                    ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=10)),
+                    vol.Optional(
+                        CONF_MAX_CONCURRENT, default=lan.max_concurrent
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=8)),
+                    vol.Optional(CONF_ENERGY_CYCLE, default=energy.cycle): vol.In(
+                        ENERGY_CYCLE_OPTIONS
+                    ),
+                    vol.Optional(
+                        CONF_ENERGY_CYCLE_DAYS, default=energy.cycle_days
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
+                    vol.Optional(
+                        CONF_ENERGY_RESET_DAY, default=energy.reset_day
+                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=28)),
+                    vol.Optional(
+                        CONF_ENERGY_RESET_WEEKDAY, default=energy.reset_weekday
+                    ): vol.In(ENERGY_WEEKDAY_OPTIONS),
+                }
+            )
+        return vol.Schema(schema)
+
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
@@ -889,6 +1049,7 @@ class DeviceOptionsFlowHandler(config_entries.OptionsFlow):
         has_hub = _hub_entry(self.hass) is not None
         energy = await async_get_energy_settings(self.hass)
         lan = await async_get_lan_settings(self.hass)
+        errors: dict[str, str] = {}
 
         if user_input is not None:
             name = (user_input.get(CONF_NAME) or "").strip()
@@ -921,44 +1082,64 @@ class DeviceOptionsFlowHandler(config_entries.OptionsFlow):
             )
             domain = self.hass.data.get(DOMAIN) or {}
             slot = domain.get(entry.entry_id) or {}
-            coord = slot.get(DATA_COORDINATOR)
-            cloud_only = bool(
-                coord and (getattr(coord, "data", None) or {}).get("cloud_only")
-            )
-            host = (entry.data.get(CONF_HOST) or "").strip()
-            if (
-                not cloud_only
-                and entry.data.get(CONF_CLOUD_GWID)
-                and host in ("", "0.0.0.0")
-            ):
-                cloud_only = True
-            if cloud_only:
-                new_options[CONF_CONTROL_MODE] = CONTROL_MODE_CLOUD
-            else:
-                mode = str(
-                    user_input.get(CONF_CONTROL_MODE) or DEFAULT_CONTROL_MODE
+
+            # Allow unlocking cloud-only entries by entering a reachable LAN IP.
+            host_in = (user_input.get(CONF_HOST) or "").strip()
+            host = host_in or (entry.data.get(CONF_HOST) or "").strip()
+            probe_failed = False
+            if host_in and host_in not in ("", "0.0.0.0"):
+                session = async_get_clientsession(self.hass)
+                probed = await async_probe_host(session, host_in)
+                if probed is None:
+                    errors["base"] = "cannot_connect"
+                    probe_failed = True
+                else:
+                    host = host_in
+                    new_data[CONF_HOST] = host
+                    new_data["cloud_only"] = False
+                    if probed.mac:
+                        new_data["mac"] = probed.mac.upper()
+                    if probed.sa_type and new_data.get(CONF_DEVICE_TYPE) in (None, ""):
+                        new_data[CONF_DEVICE_TYPE] = probed.sa_type
+            elif host_in in ("", "0.0.0.0") and CONF_HOST in user_input:
+                # Explicit clear → keep/resume cloud-only when cloud creds exist.
+                host = "0.0.0.0"
+                new_data[CONF_HOST] = host
+                if entry.data.get(CONF_CLOUD_GWID) and entry.data.get(CONF_CLOUD_AUTH):
+                    new_data["cloud_only"] = True
+
+            if not probe_failed:
+                cloud_only = bool(new_data.get("cloud_only")) or host in (
+                    "",
+                    "0.0.0.0",
                 )
-                if mode not in CONTROL_MODE_OPTIONS:
-                    mode = DEFAULT_CONTROL_MODE
-                new_options[CONF_CONTROL_MODE] = mode
-            for k in (
-                "mold_dry_simulate",
-                "mold_dry_minutes",
-                "mold_dry_air",
-                "mold_dry_fan",
-            ):
-                new_options.pop(k, None)
-            tracker = slot.get(DATA_ENERGY)
-            if tracker is not None:
-                if user_input.get(CONF_ENERGY_RESET_PERIOD):
-                    tracker.reset_period()
-                if user_input.get(CONF_ENERGY_RESET_TOTAL):
-                    tracker.reset_total()
-                from .energy import async_save_tracker
+                if cloud_only:
+                    new_options[CONF_CONTROL_MODE] = CONTROL_MODE_CLOUD
+                else:
+                    mode = str(
+                        user_input.get(CONF_CONTROL_MODE) or DEFAULT_CONTROL_MODE
+                    )
+                    if mode not in CONTROL_MODE_OPTIONS:
+                        mode = DEFAULT_CONTROL_MODE
+                    new_options[CONF_CONTROL_MODE] = mode
+                for k in (
+                    "mold_dry_simulate",
+                    "mold_dry_minutes",
+                    "mold_dry_air",
+                    "mold_dry_fan",
+                ):
+                    new_options.pop(k, None)
+                tracker = slot.get(DATA_ENERGY)
+                if tracker is not None:
+                    if user_input.get(CONF_ENERGY_RESET_PERIOD):
+                        tracker.reset_period()
+                    if user_input.get(CONF_ENERGY_RESET_TOTAL):
+                        tracker.reset_total()
+                    from .energy import async_save_tracker
 
-                await async_save_tracker(self.hass, entry.entry_id, tracker)
+                    await async_save_tracker(self.hass, entry.entry_id, tracker)
 
-            if not has_hub:
+            if not probe_failed and not has_hub:
                 settings = EnergySettings(
                     cycle=str(
                         user_input.get(CONF_ENERGY_CYCLE) or DEFAULT_ENERGY_CYCLE
@@ -1013,113 +1194,26 @@ class DeviceOptionsFlowHandler(config_entries.OptionsFlow):
                             max_concurrent=lan_settings.max_concurrent,
                         )
 
-            from .entry_helpers import async_update_entry_options
+            if not probe_failed:
+                from .entry_helpers import async_update_entry_options
 
-            async_update_entry_options(
-                self.hass,
-                entry,
-                options=new_options,
-                reload=True,
-                data=new_data,
-                title=name or entry.title,
-            )
-            return self.async_create_entry(title="", data=new_options)
+                async_update_entry_options(
+                    self.hass,
+                    entry,
+                    options=new_options,
+                    reload=True,
+                    data=new_data,
+                    title=name or entry.title,
+                )
+                return self.async_create_entry(title="", data=new_options)
 
-        sa_type = coalesce_sa_type(
-            entry.data.get(CONF_DEVICE_TYPE),
-            entry.data.get(CONF_CLOUD_DEVICE_TYPE),
-            default=TYPE_AC,
-        )
-        if sa_type is None:
-            sa_type = TYPE_AC
-        current_mt = (
-            entry.data.get(CONF_MODEL_TYPE) or default_model_type(sa_type) or ""
-        )
-        opts = entry.options
-        schema: dict[Any, Any] = {
-            vol.Optional(
-                CONF_NAME,
-                default=entry.data.get(CONF_NAME) or entry.title or "",
-            ): str,
-            vol.Optional(
-                CONF_INDOOR_MODEL,
-                default=entry.data.get(CONF_INDOOR_MODEL) or "",
-            ): str,
-            vol.Optional(CONF_MODEL_TYPE, default=current_mt): vol.In(
-                _model_type_choices(sa_type)
+        return self.async_show_form(
+            step_id="init",
+            data_schema=self._device_options_schema(
+                entry, has_hub=has_hub, energy=energy, lan=lan
             ),
-            vol.Optional(
-                CONF_UPDATE_INTERVAL,
-                default=opts.get(
-                    CONF_UPDATE_INTERVAL,
-                    entry.data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
-                ),
-            ): vol.All(vol.Coerce(int), vol.Range(min=10, max=600)),
-            vol.Optional(
-                CONF_ENERGY_ENABLED,
-                default=opts.get(CONF_ENERGY_ENABLED, True),
-            ): bool,
-            vol.Optional(
-                CONF_ENERGY_INCLUDE_HOUSE,
-                default=opts.get(CONF_ENERGY_INCLUDE_HOUSE, True),
-            ): bool,
-            vol.Optional(CONF_ENERGY_RESET_PERIOD, default=False): bool,
-            vol.Optional(CONF_ENERGY_RESET_TOTAL, default=False): bool,
-        }
-        slot = (self.hass.data.get(DOMAIN) or {}).get(entry.entry_id) or {}
-        coord = slot.get(DATA_COORDINATOR)
-        cloud_only = bool(coord and (getattr(coord, "data", None) or {}).get("cloud_only"))
-        if not cloud_only and entry.data.get(CONF_CLOUD_GWID) and entry.data.get(
-            CONF_CLOUD_AUTH
-        ):
-            # LAN host missing / 0.0.0.0 → treat as cloud-capable lock candidate
-            host = (entry.data.get(CONF_HOST) or "").strip()
-            if host in ("", "0.0.0.0"):
-                cloud_only = True
-        if cloud_only:
-            schema[
-                vol.Optional(
-                    CONF_CONTROL_MODE,
-                    default=CONTROL_MODE_CLOUD,
-                )
-            ] = vol.In({CONTROL_MODE_CLOUD: CONTROL_MODE_OPTIONS[CONTROL_MODE_CLOUD]})
-        else:
-            schema[
-                vol.Optional(
-                    CONF_CONTROL_MODE,
-                    default=opts.get(CONF_CONTROL_MODE, DEFAULT_CONTROL_MODE),
-                )
-            ] = vol.In(CONTROL_MODE_OPTIONS)
-        if not has_hub:
-            schema.update(
-                {
-                    vol.Optional(
-                        CONF_REQUEST_TIMEOUT, default=lan.timeout
-                    ): vol.All(vol.Coerce(float), vol.Range(min=2, max=60)),
-                    vol.Optional(
-                        CONF_REQUEST_RETRIES, default=lan.retries
-                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=10)),
-                    vol.Optional(
-                        CONF_REQUEST_RETRY_DELAY, default=lan.retry_delay
-                    ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=10)),
-                    vol.Optional(
-                        CONF_MAX_CONCURRENT, default=lan.max_concurrent
-                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=8)),
-                    vol.Optional(CONF_ENERGY_CYCLE, default=energy.cycle): vol.In(
-                        ENERGY_CYCLE_OPTIONS
-                    ),
-                    vol.Optional(
-                        CONF_ENERGY_CYCLE_DAYS, default=energy.cycle_days
-                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
-                    vol.Optional(
-                        CONF_ENERGY_RESET_DAY, default=energy.reset_day
-                    ): vol.All(vol.Coerce(int), vol.Range(min=1, max=28)),
-                    vol.Optional(
-                        CONF_ENERGY_RESET_WEEKDAY, default=energy.reset_weekday
-                    ): vol.In(ENERGY_WEEKDAY_OPTIONS),
-                }
-            )
-        return self.async_show_form(step_id="init", data_schema=vol.Schema(schema))
+            errors=errors,
+        )
 
 
 # Back-compat alias

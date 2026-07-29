@@ -722,12 +722,23 @@ def climate_temp_limits(profile: DeviceProfile | None) -> tuple[int | None, int 
 
 
 def dehumidifier_mode_map(profile: DeviceProfile | None) -> dict[int, str] | None:
+    """Return 0x01 mode labels for a dehumidifier profile.
+
+    Merges the ModelType CommandList with the shared fallback map so capability
+    bits beyond a sparse App list (e.g. 防霉抑菌 / 送風 on LXW/NXW) still get
+    human labels when the module advertises them.
+    """
+    from .const import DEHUMIDIFIER_AVAILABLE_MODE
+
+    base = dict(DEHUMIDIFIER_AVAILABLE_MODE)
     if not profile:
-        return None
+        return base
     cmd = get_command(profile, 0x01)
     if not cmd or cmd.parameter_type != "enum":
-        return None
-    return parse_enum_params(cmd.parameters)
+        return base
+    # Profile-specific labels win (e.g. NXW 智慧節能 vs generic 自動除濕).
+    base.update(parse_enum_params(cmd.parameters))
+    return base
 
 
 def dehumidifier_humidity_map(profile: DeviceProfile | None) -> dict[int, int] | None:

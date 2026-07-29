@@ -9,6 +9,13 @@ Home Assistant custom integration for **Panasonic TaiSEIA** appliances — **LAN
 
 ## Changelog
 
+### v1.7.4
+
+- Cloud-only dehumidifiers (e.g. LXW missed at import) can recover LAN via setup GWIP/MAC rediscovery, or unlock by entering a host IP in device options
+- Expand NXW/LXW dehumidifier CommandList modes (智慧節能 / 防霉抑菌 / 送風) and fan labels (靜音除濕 / 快速除濕)
+- Mode list follows device capability bits, not only the sparse App enum
+- Note: shoe-closet mode is panel-only; official App/IoT cannot select it (per manual)
+
 ### v1.7.3
 
 - Platform entities only follow probed SA type (not catalog profile)
@@ -127,7 +134,8 @@ Copy `custom_components/panasonic_taiseia_local` into your HA `custom_components
 
 1. **EMS account import** (recommended): hub login, then multi-select devices (LAN and/or cloud-only)
 2. **Discovery** / **manual IP** for LAN modules
-3. Per device: name, ModelType, poll interval, **control path**, energy options
+3. Per device: name, **LAN host IP**, ModelType, poll interval, **control path**, energy options
+4. If a unit was imported cloud-only but TCP 57223 is open: set the LAN IP in device options (or reload so setup retries GWIP/MAC discovery) to unlock local/hybrid
 
 ## Dynamic IP (DHCP)
 

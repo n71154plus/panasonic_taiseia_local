@@ -281,16 +281,22 @@ DEHUMIDIFIER_MAX_HUMD = 70
 DEHUMIDIFIER_AVAILABLE_HUMIDITY = {
     0: 40, 1: 45, 2: 50, 3: 55, 4: 60, 5: 65, 6: 70,
 }
+# Panasonic App / panel labels for dehumidifier 0x01 (ModelType may rename a few).
 DEHUMIDIFIER_AVAILABLE_MODE = {
     0: "連續除濕",
-    1: "自動除濕",
+    1: "自動除濕",  # LXW/NXW CommandList: 智慧節能 (ECONAVI)
     2: "防霉抑菌",
     4: "衣物乾燥",
     5: "保持乾燥",
     6: "濕度設定",
-    7: "空氣清淨",
+    7: "送風",  # JHW catalog uses 空氣清淨 for the same code
 }
-DEHUMIDIFIER_AVAILABLE_FAN = {0: "自動", 1: "靜音", 2: "標準", 3: "急速"}
+DEHUMIDIFIER_AVAILABLE_FAN = {
+    0: "自動",
+    1: "靜音除濕",
+    2: "標準",
+    3: "快速除濕",
+}
 DEHUMIDIFIER_AVAILABLE_FAN_DIR = {
     0: "固定", 1: "下方向", 2: "上方向", 3: "廣角", 4: "下吹",
 }
