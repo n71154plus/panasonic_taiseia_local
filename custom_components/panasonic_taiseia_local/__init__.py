@@ -59,11 +59,12 @@ from .const import (
 )
 from .control import (
     DeviceControl,
+    async_get_cloud_account,
     default_cloud_command_types,
     entry_has_cloud_creds,
     resolve_control_mode,
 )
-from .discovery import async_find_host_by_mac
+from .discovery import async_find_host_by_mac, async_probe_host
 from .energy import (
     async_get_energy_settings,
     async_load_tracker,
@@ -200,6 +201,74 @@ async def _async_rebinding_host(
     return found.host
 
 
+async def _async_recover_lan_for_cloud_only(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    client: TaiSeiaClient,
+) -> str | None:
+    """Try to upgrade an intentional cloud-only entry when LAN becomes reachable.
+
+    Import may have missed TCP 57223 (VLAN/Docker/temporary offline). Retry by
+    MAC discovery and EMS UserGetGWIP before permanently locking control mode.
+    """
+    session = async_get_clientsession(hass)
+    mac = _entry_mac(entry)
+    gwid = (entry.data.get(CONF_CLOUD_GWID) or "").strip()
+
+    candidates: list[str] = []
+    if mac:
+        try:
+            found = await async_find_host_by_mac(
+                session, mac, include_subnet_scan=True
+            )
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("cloud-only LAN rediscover failed for %s: %s", mac, err)
+            found = None
+        if found and found.host and found.host not in ("", "0.0.0.0"):
+            candidates.append(found.host)
+
+    if gwid:
+        try:
+            cloud = await async_get_cloud_account(hass, entry)
+            if cloud is not None:
+                gw_ip = await cloud.async_get_gw_ip(gwid)
+                if gw_ip and gw_ip not in candidates:
+                    candidates.append(gw_ip)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("cloud-only GWIP failed for %s: %s", gwid, err)
+
+    for host in candidates:
+        probed = await async_probe_host(session, host)
+        if probed is None:
+            continue
+        probed_mac = (probed.mac or "").upper()
+        if mac and probed_mac and probed_mac != mac:
+            continue
+        _LOGGER.info(
+            "TaiSEIA cloud-only entry %s recovered on LAN at %s",
+            entry.title or gwid or mac or "?",
+            host,
+        )
+        client.host = host
+        client.device.host = host
+        if probed.mac:
+            client.device.mac = probed.mac
+        if probed.sa_type:
+            client.device.sa_type_id = probed.sa_type
+        new_data = dict(entry.data)
+        new_data[CONF_HOST] = host
+        new_data["cloud_only"] = False
+        if probed.mac:
+            new_data["mac"] = probed.mac.upper()
+        async_update_entry_data(hass, entry, data=new_data)
+        opts = dict(entry.options)
+        if opts.get(CONF_CONTROL_MODE) == CONTROL_MODE_CLOUD:
+            opts[CONF_CONTROL_MODE] = DEFAULT_CONTROL_MODE
+            async_update_entry_options(hass, entry, options=opts, reload=False)
+        return host
+    return None
+
+
 async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     host = entry.data.get(CONF_HOST) or "0.0.0.0"
     session = async_get_clientsession(hass)
@@ -244,21 +313,30 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         client.device.sa_type_id = sa_type if sa_type is not None else TYPE_AC
 
     if intentionally_cloud:
-        cloud_only = True
-        _apply_entry_sa_type()
-        client.device.host = host
-        mac = _entry_mac(entry)
-        if mac:
-            client.device.mac = mac
-        gwid = (entry.data.get(CONF_CLOUD_GWID) or "").strip()
-        if gwid:
-            client.device.udn = f"gwid:{gwid.lower()}"
-        _LOGGER.info(
-            "TaiSEIA cloud-only setup for %s (GWID=%s)",
-            entry.title or host,
-            gwid or "?",
-        )
-    else:
+        recovered = await _async_recover_lan_for_cloud_only(hass, entry, client)
+        if recovered:
+            # LAN module found — leave intentionally_cloud so the normal probe
+            # path below loads services and clears sticky cloud_only.
+            intentionally_cloud = False
+            cloud_only = False
+            host = recovered
+        else:
+            cloud_only = True
+            _apply_entry_sa_type()
+            client.device.host = host
+            mac = _entry_mac(entry)
+            if mac:
+                client.device.mac = mac
+            gwid = (entry.data.get(CONF_CLOUD_GWID) or "").strip()
+            if gwid:
+                client.device.udn = f"gwid:{gwid.lower()}"
+            _LOGGER.info(
+                "TaiSEIA cloud-only setup for %s (GWID=%s)",
+                entry.title or host,
+                gwid or "?",
+            )
+
+    if not intentionally_cloud:
         stagger = _setup_stagger_seconds(host)
         if stagger:
             await asyncio.sleep(stagger)
@@ -316,7 +394,8 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Older temporary-LAN-lock bugs could leave cloud_only=True while the host
     # is still a real LAN IP. Clear that inconsistency; if control_mode was
     # also forced to cloud by the same bug, restore hybrid. Intentional
-    # cloud-only imports use host 0.0.0.0 and are untouched here.
+    # cloud-only imports use host 0.0.0.0 and are untouched here. Do not
+    # override a user who chose CONTROL_MODE_CLOUD on a LAN-capable device.
     if (
         not intentionally_cloud
         and host not in ("", "0.0.0.0")

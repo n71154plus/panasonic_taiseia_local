@@ -76,6 +76,7 @@
           "password": "更新密碼（留空則不變）",
           "refresh_cloud": "重新登入並更新 token",
           "name": "顯示名稱",
+          "host": "區網 IP（空白／0.0.0.0＝僅雲端；填入可連線 IP 可解除鎖定並啟用本地／混合）",
           "indoor_model": "室內機型號（選填）",
           "model_type": "ModelType（CommandList）",
           "update_interval": "輪詢間隔（秒，本機）",
