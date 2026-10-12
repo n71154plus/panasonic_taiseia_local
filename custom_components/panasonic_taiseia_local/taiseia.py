@@ -378,7 +378,12 @@ class TaiSeiaClient:
             self.device.sa_type_id = 0
             _LOGGER.debug("REG_TYPE_ID failed on %s; SA type left unset", self.host)
 
-        reg = await self.async_read(TYPE_REGISTER, REG_REGISTER)
+        try:
+            reg = await self.async_read(TYPE_REGISTER, REG_REGISTER)
+        except TaiSeiaCommandError:
+            # PIOT-V2 modules reject REGISTER but answer the dedicated reads below.
+            reg = b""
+            _LOGGER.debug("REG_REGISTER rejected on %s; using dedicated reads", self.host)
         # brand/model from register
         body = reg[8:-1] if len(reg) > 8 else b""
         try:
@@ -406,6 +411,8 @@ class TaiSeiaClient:
             svc_resp = await self.async_read(TYPE_REGISTER, REG_SERVICES)
             self.device.services = parse_services_pdu(svc_resp)
         except TaiSeiaError:
+            if not reg:
+                raise
             self.device.services = parse_services_pdu(reg)
         if not self.device.services:
             self.device.services = parse_services_pdu(reg)
