@@ -11,6 +11,7 @@ Home Assistant custom integration for **Panasonic TaiSEIA** appliances — **LAN
 
 ### v1.7.4
 
+- Cloud control re-authenticates when EMS rejects an expired CPToken (plain-text HTTP 417), then stores the new token
 - Cloud-only dehumidifiers (e.g. LXW missed at import) can recover LAN via setup GWIP/MAC rediscovery, or unlock by entering a host IP in device options
 - Expand NXW/LXW dehumidifier CommandList modes (智慧節能 / 防霉抑菌 / 送風) and fan labels (靜音除濕 / 快速除濕)
 - Mode list follows device capability bits, not only the sparse App enum
