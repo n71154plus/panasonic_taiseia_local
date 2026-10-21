@@ -166,6 +166,43 @@ class TaiSeiaClimate(TaiSeiaBaseEntity, ClimateEntity):
             "control_path": data.get("control_path"),
         }
 
+    def _resume_mode(self) -> HVACMode | None:
+        """Return the mode the device was last set to, even while powered off.
+
+        TaiSEIA controllers keep the mode register (0x01) when power is off,
+        so the last-used mode survives a plain off/on cycle.
+        """
+        if not self.has_status(STATUS_MODE):
+            return None
+        value = self.status_int(STATUS_MODE)
+        for mode in self._mode_table():
+            if (
+                mode["mappingCode"] == value
+                and mode["key"] != HVACMode.OFF
+                and mode["key"] in self.hvac_modes
+            ):
+                return mode["key"]
+        return None
+
+    async def async_turn_on(self) -> None:
+        """Turn on, resuming the last-used mode instead of heat.
+
+        The core ClimateEntity default picks the first supported mode in a
+        fixed (heat_cool, heat, cool) order, which makes cooling-capable ACs
+        with a heat mode always start in heat. HA core deliberately leaves
+        this to integrations (see home-assistant/core#181909).
+        """
+        mode = self._resume_mode()
+        if mode is None:
+            supported = [m for m in self.hvac_modes if m != HVACMode.OFF]
+            if HVACMode.COOL in supported:
+                mode = HVACMode.COOL
+            elif supported:
+                mode = supported[0]
+        if mode is None:
+            raise HomeAssistantError(f"[{self.label}] 無可運轉的 HVAC 模式")
+        await self.async_set_hvac_mode(mode)
+
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         _LOGGER.debug("[%s] set_hvac_mode %s", self.label, hvac_mode)
         try:
