@@ -55,6 +55,7 @@ from .const import (
     ENTRY_TYPE_HUB,
     PLATFORMS,
     STATUS_OPERATING_POWER,
+    STATUS_POWER,
     SVC_OPERATING_POWER,
     TYPE_AC,
 )
@@ -70,6 +71,7 @@ from .energy import (
     async_get_energy_settings,
     async_load_tracker,
     async_save_tracker,
+    billable_operating_power,
     period_label,
 )
 from .entry_helpers import (
@@ -659,6 +661,9 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         power_w = float(raw)
                     except (TypeError, ValueError):
                         power_w = None
+                # 0x27 is shared outdoor watts. Match the app: an indoor head
+                # that is off does not accumulate them.
+                power_w = billable_operating_power(power_w, status.get(STATUS_POWER))
                 energy_tracker.update(power_w)
                 # Persist only when kWh changed, or throttle timestamp meta
                 await async_save_tracker(hass, entry_id, energy_tracker)
