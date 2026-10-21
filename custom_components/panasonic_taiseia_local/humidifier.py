@@ -11,7 +11,7 @@ from homeassistant.components.humidifier import (
 )
 from homeassistant.exceptions import HomeAssistantError
 
-from .capability import filter_option_map
+from .capability import filter_option_map, supported_values
 from .catalog import dehumidifier_humidity_map, dehumidifier_mode_map
 from .const import (
     DATA_CLIENT,
@@ -81,8 +81,18 @@ class TaiSeiaDehumidifier(TaiSeiaBaseEntity, HumidifierEntity):
         return self.status_bool(STATUS_POWER)
 
     def _mode_map(self) -> dict[int, str]:
-        base = dehumidifier_mode_map(self._profile) or DEHUMIDIFIER_AVAILABLE_MODE
-        return filter_option_map(self.client, SVC_MODE, base)
+        base = dehumidifier_mode_map(self._profile) or dict(
+            DEHUMIDIFIER_AVAILABLE_MODE
+        )
+        filtered = filter_option_map(self.client, SVC_MODE, base)
+        # Include capability-supported codes missing from the catalog map.
+        info = self.client.device.services.get(SVC_MODE)
+        if not info:
+            return filtered
+        for value in supported_values(info, list(base.keys())):
+            if value not in filtered:
+                filtered[value] = base.get(value, f"模式 {value}")
+        return dict(sorted(filtered.items()))
 
     def _humidity_map(self) -> dict[int, int]:
         return dehumidifier_humidity_map(self._profile) or DEHUMIDIFIER_AVAILABLE_HUMIDITY
