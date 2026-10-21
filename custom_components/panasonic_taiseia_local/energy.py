@@ -109,6 +109,32 @@ def period_key(
     return start.strftime("%Y-%m-%d")
 
 
+def billable_operating_power(
+    power_w: float | None, power_switch: Any
+) -> float | None:
+    """Bill 0x27 watts only while this indoor unit is on.
+
+    The register is outdoor-unit power. A multi-split copies it onto every
+    indoor head, including the standby watts while that head is off. The
+    official app (UserGetInfo, name=Power) leaves an unused indoor at 0 kWh.
+    """
+    if power_switch is None or power_switch == "":
+        return power_w
+    try:
+        switched_on = float(power_switch) != 0
+    except (TypeError, ValueError):
+        text = str(power_switch).strip().lower()
+        if text in ("on", "true"):
+            switched_on = True
+        elif text in ("off", "false"):
+            switched_on = False
+        else:
+            return power_w
+    if not switched_on:
+        return 0.0
+    return power_w
+
+
 def period_label(cycle: str, cycle_days: int | None = None) -> str:
     if cycle == ENERGY_CYCLE_DAYS:
         n = max(1, int(cycle_days or DEFAULT_ENERGY_CYCLE_DAYS))
