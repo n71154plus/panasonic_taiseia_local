@@ -373,7 +373,29 @@ class DeviceControl:
             return status, "lan"
 
         if mode == CONTROL_MODE_CLOUD:
-            status = await self._cloud_status(command_types)
+            try:
+                status = await self._cloud_status(command_types)
+            except CloudDeviceOffline as err:
+                # EMS reached, appliance not: powered off / unplugged (a washer
+                # drops its Wi-Fi module with panel power). That is a normal
+                # state, not a failed poll — report an empty status so entities
+                # go unavailable and the next poll picks the device up again.
+                # Exception: a LAN module that was never probed must keep
+                # failing so the setup retry re-probes it.
+                if not (self.cloud_only or self.lan_ok):
+                    raise
+                if self.last_path != "offline":
+                    _LOGGER.info(
+                        "TaiSEIA %s is offline per EMS (%s); waiting for it to return",
+                        self.entry.title or self.client.host,
+                        err,
+                    )
+                self.last_path = "offline"
+                return {}, "offline"
+            if self.last_path == "offline":
+                _LOGGER.info(
+                    "TaiSEIA %s is back online", self.entry.title or self.client.host
+                )
             self.last_path = "cloud"
             return status, "cloud"
 
