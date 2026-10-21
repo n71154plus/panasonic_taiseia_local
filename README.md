@@ -9,6 +9,10 @@ Home Assistant custom integration for **Panasonic TaiSEIA** appliances — **LAN
 
 ## Changelog
 
+### v1.7.4
+
+- Cloud control re-authenticates when EMS rejects an expired CPToken (plain-text HTTP 417), then stores the new token
+
 ### v1.7.3
 
 - Platform entities only follow probed SA type (not catalog profile)

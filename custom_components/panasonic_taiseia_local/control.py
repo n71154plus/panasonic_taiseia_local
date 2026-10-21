@@ -225,6 +225,12 @@ class DeviceControl:
         if changed:
             async_update_entry_data(self.hass, hub, data=new_hub)
 
+    async def _save_cloud_tokens(self, live: ConfigEntry, cloud: CloudAccount) -> None:
+        """Persist a rotated CPToken and keep this account for later calls."""
+        await self._persist_hub_tokens(live, cloud)
+        self._cloud = cloud
+        self._cloud_key = self._hub_cred_key()
+
     async def _cloud_write(self, service: int, value: int) -> None:
         live = self._live_entry()
         creds = await async_refresh_cloud_auth(self.hass, live)
@@ -235,26 +241,33 @@ class DeviceControl:
         if cloud is None:
             raise CloudApiError("no hub cloud account")
         try:
-            await cloud.async_set_command(
-                auth=auth,
-                gwid=gwid,
-                command_type=command_type_hex(service),
-                value=value,
-                priority=RequestPriority.USER,
-            )
-        except CloudAuthError:
-            creds = await async_refresh_cloud_auth(self.hass, live, force=True)
-            if not creds:
-                raise
-            gwid, auth = creds
-            await cloud.async_set_command(
-                auth=auth,
-                gwid=gwid,
-                command_type=command_type_hex(service),
-                value=value,
-                priority=RequestPriority.USER,
-            )
-        await self._persist_hub_tokens(live, cloud)
+            try:
+                await cloud.async_set_command(
+                    auth=auth,
+                    gwid=gwid,
+                    command_type=command_type_hex(service),
+                    value=value,
+                    priority=RequestPriority.USER,
+                )
+            except CloudAuthError:
+                await self._save_cloud_tokens(live, cloud)
+                self._cloud = None
+                creds = await async_refresh_cloud_auth(self.hass, live, force=True)
+                if not creds:
+                    raise
+                gwid, auth = creds
+                cloud = await self._cloud_account()
+                if cloud is None:
+                    raise CloudApiError("no hub cloud account")
+                await cloud.async_set_command(
+                    auth=auth,
+                    gwid=gwid,
+                    command_type=command_type_hex(service),
+                    value=value,
+                    priority=RequestPriority.USER,
+                )
+        finally:
+            await self._save_cloud_tokens(live, cloud)
 
     async def _cloud_status(
         self, command_types: list[str] | None
@@ -274,23 +287,31 @@ class DeviceControl:
         # EMS GetInfo caps; prefer caller-provided prioritized list.
         types = types[:24]
         try:
-            return await cloud.async_get_device_info(
-                auth=auth,
-                gwid=gwid,
-                command_types=types,
-                priority=RequestPriority.BACKGROUND,
-            )
-        except CloudAuthError:
-            creds = await async_refresh_cloud_auth(self.hass, live, force=True)
-            if not creds:
-                raise
-            gwid, auth = creds
-            return await cloud.async_get_device_info(
-                auth=auth,
-                gwid=gwid,
-                command_types=types,
-                priority=RequestPriority.BACKGROUND,
-            )
+            try:
+                return await cloud.async_get_device_info(
+                    auth=auth,
+                    gwid=gwid,
+                    command_types=types,
+                    priority=RequestPriority.BACKGROUND,
+                )
+            except CloudAuthError:
+                await self._save_cloud_tokens(live, cloud)
+                self._cloud = None
+                creds = await async_refresh_cloud_auth(self.hass, live, force=True)
+                if not creds:
+                    raise
+                gwid, auth = creds
+                cloud = await self._cloud_account()
+                if cloud is None:
+                    raise CloudApiError("no hub cloud account")
+                return await cloud.async_get_device_info(
+                    auth=auth,
+                    gwid=gwid,
+                    command_types=types,
+                    priority=RequestPriority.BACKGROUND,
+                )
+        finally:
+            await self._save_cloud_tokens(live, cloud)
 
     async def async_write(self, service: int, value: int) -> str:
         """Write one TaiSEIA service; return path used ('cloud'|'lan')."""

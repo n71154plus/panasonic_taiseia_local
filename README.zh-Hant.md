@@ -9,6 +9,10 @@ Home Assistant 自訂整合：控制配備 **TaiSEIA** 的 Panasonic 家電，�
 
 ## 更新紀錄
 
+### v1.7.4
+
+- 雲端控制遇到 CPToken 過期（HTTP 417 純文字）會重新登入取得 token，並寫回設定
+
 ### v1.7.3
 
 - Climate／Humidifier 只依探測到的 SA 類型建立實體

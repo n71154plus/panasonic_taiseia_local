@@ -52,7 +52,14 @@ from panasonic_taiseia_local.const import (  # noqa: E402
     CONTROL_MODE_LOCAL,
     DEFAULT_CONTROL_MODE,
 )
-from panasonic_taiseia_local.ems_transport import classify_state_msg, CloudRateLimited  # noqa: E402
+from panasonic_taiseia_local.ems_transport import (  # noqa: E402
+    CloudAuthError,
+    CloudRateLimited,
+    EmsSettings,
+    EmsTransport,
+    classify_state_msg,
+    exception_from_body,
+)
 
 
 class ApkContractTests(unittest.TestCase):
@@ -115,6 +122,96 @@ class CloudDeviceFlagsTests(unittest.TestCase):
             mac=None,
         )
         self.assertFalse(d2.is_local_candidate)
+
+
+class ExpiredCpTokenTests(unittest.IsolatedAsyncioTestCase):
+    def test_plain_text_expiry_is_auth_error(self):
+        err = exception_from_body("此CPToken已經逾時")
+        self.assertIsInstance(err, CloudAuthError)
+
+    def test_json_state_msg_still_classified(self):
+        err = exception_from_body('{"State":"fail","StateMsg":"此CPToken已經逾時"}')
+        self.assertIsInstance(err, CloudAuthError)
+        limited = exception_from_body('{"StateMsg":"系統檢測您當前超量使用"}')
+        self.assertIsInstance(limited, CloudRateLimited)
+
+    async def test_transport_plain_417_raises_auth(self):
+        import aiohttp
+
+        class _Timeout:
+            def __init__(self, total=None):
+                self.total = total
+
+        aiohttp.ClientTimeout = _Timeout
+
+        class _Resp:
+            status = 417
+
+            async def text(self):
+                return "此CPToken已經逾時"
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+        class _Session:
+            def request(self, *args, **kwargs):
+                return _Resp()
+
+        transport = EmsTransport(_Session(), object(), EmsSettings())  # type: ignore[arg-type]
+        with self.assertRaises(CloudAuthError):
+            await transport._request_once(
+                "GET",
+                "/UserGetRegisteredGwList2",
+                headers=None,
+                params=None,
+                json_body=None,
+                data=None,
+                expect_json=True,
+            )
+
+    async def test_expired_token_password_login(self):
+        from panasonic_taiseia_local import cloud as cloud_mod
+        from panasonic_taiseia_local.cloud import CloudAccount
+
+        account_name = "expired-token@example.com"
+        cloud_mod._reauth_locks.pop(account_name, None)
+        cloud_mod._reauth_tokens.pop(account_name, None)
+
+        class _Stub:
+            def __init__(self):
+                self.paths: list[str] = []
+
+            async def request(self, method, path, **kwargs):
+                self.paths.append(path)
+                headers = kwargs.get("headers") or {}
+                if path == "/RefreshToken1":
+                    raise CloudAuthError("無效RefreshToken")
+                if path == "/userlogin1":
+                    return {"CPToken": "fresh-token", "RefreshToken": "refresh-2"}
+                if path == "/UserGetRegisteredGwList2":
+                    if headers.get("cptoken") != "fresh-token":
+                        raise CloudAuthError("此CPToken已經逾時")
+                    return {"GwList": []}
+                raise AssertionError(path)
+
+        stub = _Stub()
+        account = CloudAccount(
+            None,  # type: ignore[arg-type]
+            account_name,
+            "secret",
+            refresh_token="old-refresh",
+            cp_token="expired-token",
+            transport=stub,  # type: ignore[arg-type]
+        )
+        devices = await account.async_get_devices()
+        self.assertEqual(devices, [])
+        self.assertEqual(account.cp_token, "fresh-token")
+        self.assertEqual(account.refresh_token, "refresh-2")
+        self.assertIn("/userlogin1", stub.paths)
+        self.assertEqual(stub.paths[-1], "/UserGetRegisteredGwList2")
 
 
 if __name__ == "__main__":

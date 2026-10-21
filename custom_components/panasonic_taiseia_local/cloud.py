@@ -8,6 +8,7 @@ Transport/rate-limit: ems_transport.EmsTransport (not community smart_app).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from dataclasses import dataclass
@@ -37,6 +38,10 @@ _GW_IP = "/UserGetGWIP"
 _SET_COMMAND = "/DeviceSetCommand"
 _GET_INFO = "/DeviceGetInfo"
 _OVERVIEW = "/UserGetDeviceStatus"
+
+# One in-flight re-login per account so parallel cloud polls do not stampede EMS.
+_reauth_locks: dict[str, asyncio.Lock] = {}
+_reauth_tokens: dict[str, tuple[str | None, str | None]] = {}
 
 _MAC_RE = re.compile(r"^[0-9A-Fa-f]{12}$")
 _IPV4_RE = re.compile(
@@ -239,6 +244,24 @@ class CloudAccount:
                 _LOGGER.debug("Refresh failed; falling back to password login")
         await self.login()
 
+    def _reauth_lock(self) -> asyncio.Lock:
+        return _reauth_locks.setdefault(self.account, asyncio.Lock())
+
+    async def _reauthenticate(self, rejected: str | None) -> None:
+        """Drop a rejected CPToken, then refresh or password-login once."""
+        async with self._reauth_lock():
+            shared = _reauth_tokens.get(self.account)
+            if shared and shared[0] and shared[0] != rejected:
+                self.cp_token = shared[0]
+                if shared[1]:
+                    self.refresh_token = shared[1]
+                return
+            _LOGGER.info("EMS rejected CPToken; signing in again")
+            self.cp_token = None
+            await self.ensure_login()
+            if self.cp_token:
+                _reauth_tokens[self.account] = (self.cp_token, self.refresh_token)
+
     async def refresh(self) -> None:
         if not self.refresh_token:
             raise CloudAuthError("no refresh token")
@@ -271,9 +294,14 @@ class CloudAccount:
         await self.ensure_login()
         try:
             return await factory()
-        except CloudAuthError:
-            await self.login()
-            return await factory()
+        except CloudAuthError as err:
+            rejected = self.cp_token
+            await self._reauthenticate(rejected)
+            try:
+                return await factory()
+            except CloudAuthError:
+                _LOGGER.warning("EMS still rejected CPToken after re-login: %s", err)
+                raise
 
     async def async_get_devices(self) -> list[CloudDevice]:
         async def _call():
