@@ -11,16 +11,16 @@ Home Assistant custom integration for **Panasonic TaiSEIA** appliances — **LAN
 
 ### v1.7.5
 
-- Load CommandList and optional device-name hints off the Home Assistant event loop
-- Device-name hint files use the config directory instead of a hardcoded `/config` path
+- **Cloud appliance powered off:** EMS `503:DeviceJPInfo` (the module drops offline when the panel is off, or the appliance is unplugged) no longer fails setup. The entry loads, entities stay unavailable, and the next poll recovers them.
+- **PIOT-V2 LAN probe:** modules that answer `FFFFFFFFFFFF` to the REGISTER read still expose type, model, services, and states. A reachable TCP 57223 device is no longer imported as cloud-only because of that one rejection.
+- **Air conditioner turn on:** `climate.turn_on` resumes the last mode kept in register `0x01`, instead of Home Assistant's heat-first default. With no usable history it falls back to cool.
+- **Dehumidifier LAN unlock (F-YV32LX / LXW):** setup retries MAC rediscovery, EMS `UserGetGWIP`, and a LAN probe for cloud-only entries. Device options accept a host IP; a reachable address clears the cloud-only lock and restores hybrid or local control. Adding the same MAC again upgrades the old cloud-only entry.
+- **Dehumidifier modes (F-YV28NX / NXW and LXW):** CommandList `0x01` adds 智慧節能, 防霉抑菌, and 送風 when the module capability bitmask includes them. Fan `0x0E` labels are 靜音除濕 and 快速除濕. 烘鞋衣櫃 stays panel-only, the same limit as the official app.
+- **Event loop:** the CommandList is read off the loop before setup, the config flow, and cloud sync. Optional nickname files use `hass.config.path()` and are loaded in an executor, so a missing file no longer calls `open()` on the loop.
 
 ### v1.7.4
 
 - Cloud control re-authenticates when EMS rejects an expired CPToken (plain-text HTTP 417), then stores the new token
-- Cloud-only dehumidifiers (e.g. LXW missed at import) can recover LAN via setup GWIP/MAC rediscovery, or unlock by entering a host IP in device options
-- Expand NXW/LXW dehumidifier CommandList modes (智慧節能 / 防霉抑菌 / 送風) and fan labels (靜音除濕 / 快速除濕)
-- Mode list follows device capability bits, not only the sparse App enum
-- Note: shoe-closet mode is panel-only; official App/IoT cannot select it (per manual)
 
 ### v1.7.3
 
