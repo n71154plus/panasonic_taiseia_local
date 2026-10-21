@@ -161,6 +161,9 @@ async def async_sync_cloud_to_devices(
     hass: HomeAssistant, hub: ConfigEntry
 ) -> int:
     """Pull EMS list and patch linked local device entries + registry."""
+    from .catalog import async_load_catalog
+
+    await async_load_catalog(hass)
     try:
         devices = await async_fetch_cloud_devices(hass, hub)
     except Exception as err:  # noqa: BLE001

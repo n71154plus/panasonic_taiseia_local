@@ -6,7 +6,10 @@ from dataclasses import dataclass, field
 import json
 import logging
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from homeassistant.core import HomeAssistant
 
 from homeassistant.components.climate import HVACMode
 
@@ -241,6 +244,13 @@ def load_catalog() -> dict[str, dict[str, Any]]:
     _CATALOG = catalog
     _LOGGER.debug("Loaded CommandList: %s ModelTypes", len(catalog))
     return catalog
+
+
+async def async_load_catalog(hass: HomeAssistant) -> dict[str, dict[str, Any]]:
+    """Load CommandList off the event loop. Later calls reuse the cache."""
+    if _CATALOG is not None:
+        return _CATALOG
+    return await hass.async_add_executor_job(load_catalog)
 
 
 def list_model_types(device_type: int | None = None) -> list[str]:

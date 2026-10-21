@@ -104,5 +104,70 @@ class MaskAccountTest(unittest.TestCase):
         self.assertEqual(mask_account("a@x.tw"), "*@x.tw")
 
 
+class EventLoopIoTest(unittest.IsolatedAsyncioTestCase):
+    def test_hints_come_from_preload_not_config_path(self) -> None:
+        import panasonic_taiseia_local.naming as naming
+
+        saved = naming._DEVICE_HINTS
+        naming._DEVICE_HINTS = [
+            {
+                "GWID": "AABBCCDDEEFF",
+                "NickName": "客廳",
+                "Model": "CS-RX90JA2",
+                "ModelType": "PXGD",
+            }
+        ]
+        try:
+            found = naming.async_suggest_name(None, "aa:bb:cc:dd:ee:ff")
+        finally:
+            naming._DEVICE_HINTS = saved
+        self.assertIsNotNone(found)
+        assert found is not None
+        self.assertEqual(found.nickname, "客廳")
+        self.assertEqual(found.model_type, "PXGD")
+
+    def test_read_hints_uses_supplied_paths(self) -> None:
+        import tempfile
+
+        from panasonic_taiseia_local.naming import _read_device_hints
+
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp) / "missing.json"
+            present = Path(tmp) / "panasonic_devices.json"
+            present.write_text(
+                '[{"GWID":"001122334455","NickName":"書房"}]',
+                encoding="utf-8",
+            )
+            hints = _read_device_hints((missing, present))
+        self.assertEqual(hints[0]["NickName"], "書房")
+
+    async def test_catalog_load_uses_executor_until_cached(self) -> None:
+        import panasonic_taiseia_local.catalog as catalog
+
+        saved = catalog._CATALOG
+        catalog._CATALOG = None
+
+        class _Hass:
+            def __init__(self) -> None:
+                self.called = False
+
+            async def async_add_executor_job(self, func, *args):
+                self.called = True
+                return func(*args)
+
+        hass = _Hass()
+        try:
+            loaded = await catalog.async_load_catalog(hass)  # type: ignore[arg-type]
+            self.assertTrue(hass.called)
+            self.assertIn("PXGD", loaded)
+            hass.called = False
+            again = await catalog.async_load_catalog(hass)  # type: ignore[arg-type]
+            self.assertFalse(hass.called)
+            self.assertIs(again, loaded)
+        finally:
+            if catalog._CATALOG is None:
+                catalog._CATALOG = saved
+
+
 if __name__ == "__main__":
     unittest.main()
