@@ -21,6 +21,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import homeassistant.helpers.config_validation as cv
 
 from .catalog import (
+    async_load_catalog,
     default_model_type,
     list_model_types,
     model_type_matches_device,
@@ -257,6 +258,7 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def _async_build_import_candidates(self) -> dict[str, str]:
         """Merge cloud inventory with LAN discovery. Return key → label."""
+        await async_load_catalog(self.hass)
         session = async_get_clientsession(self.hass)
         try:
             found = await async_discover_devices(
@@ -485,6 +487,7 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_device_import(self, user_input: dict[str, Any]) -> FlowResult:
         """Create a single device entry (invoked programmatically)."""
+        await async_load_catalog(self.hass)
         mac = (user_input.get("mac") or "").upper() or None
         gwid = (user_input.get(CONF_CLOUD_GWID) or "").strip()
         host = (user_input.get(CONF_HOST) or "0.0.0.0").strip() or "0.0.0.0"
@@ -557,6 +560,7 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_discover(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
+        await async_load_catalog(self.hass)
         self._errors = {}
         if user_input is not None:
             key = user_input["device"]
@@ -615,6 +619,7 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_manual(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
+        await async_load_catalog(self.hass)
         self._errors = {}
         if user_input is not None:
             host = user_input[CONF_HOST].strip()
@@ -675,6 +680,7 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_discover_confirm(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
+        await async_load_catalog(self.hass)
         device = next(iter(self._discovered.values()), None)
         if device is None:
             return self.async_abort(reason="cannot_connect")
@@ -885,6 +891,7 @@ class DeviceOptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
+        await async_load_catalog(self.hass)
         entry = self.config_entry
         has_hub = _hub_entry(self.hass) is not None
         energy = await async_get_energy_settings(self.hass)

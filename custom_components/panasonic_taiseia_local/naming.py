@@ -14,10 +14,8 @@ from homeassistant.helpers import device_registry as dr
 _LOGGER = logging.getLogger(__package__)
 
 _SA_MODEL_RE = re.compile(r"^RX-\d", re.I)
-_DEVICES_JSON_CANDIDATES = (
-    Path("/config/pyscript/panasonic_devices.json"),
-    Path("/config/panasonic_devices.json"),
-)
+# Parsed once, off the event loop. None means "not loaded yet".
+_DEVICE_HINTS: list[dict] | None = None
 
 
 @dataclass(frozen=True)
@@ -35,26 +33,51 @@ def looks_like_module_model(name: str | None) -> bool:
     return bool(_SA_MODEL_RE.match(base)) or base.lower().startswith("panasonicsmart")
 
 
-def _from_devices_json(mac: str) -> SuggestedName | None:
-    mac_u = mac.upper()
-    for path in _DEVICES_JSON_CANDIDATES:
+def device_hint_paths(hass: HomeAssistant) -> tuple[Path, ...]:
+    """Optional nickname files under the HA config dir (not hardcoded /config)."""
+    return (
+        Path(hass.config.path("pyscript", "panasonic_devices.json")),
+        Path(hass.config.path("panasonic_devices.json")),
+    )
+
+
+def _read_device_hints(paths: tuple[Path, ...]) -> list[dict]:
+    """Read the first valid devices JSON. Missing files are ignored."""
+    for path in paths:
         try:
-            raw = path.read_text(encoding="utf-8")
-            data = json.loads(raw)
+            data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        if not isinstance(data, list):
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+    return []
+
+
+async def async_preload_device_hints(hass: HomeAssistant) -> None:
+    """Load optional nickname hints off the event loop."""
+    global _DEVICE_HINTS
+    if _DEVICE_HINTS is not None:
+        return
+    _DEVICE_HINTS = await hass.async_add_executor_job(
+        _read_device_hints, device_hint_paths(hass)
+    )
+
+
+def _from_devices_json(mac: str) -> SuggestedName | None:
+    """Match a MAC against hints already loaded by async_preload_device_hints."""
+    if not _DEVICE_HINTS:
+        return None
+    mac_u = mac.upper()
+    for item in _DEVICE_HINTS:
+        gwid = str(item.get("GWID") or "").upper()
+        if gwid != mac_u:
             continue
-        for item in data:
-            gwid = str(item.get("GWID") or "").upper()
-            if gwid != mac_u:
-                continue
-            nick = (item.get("NickName") or "").strip()
-            model = (item.get("Model") or "").strip() or None
-            model_type = (item.get("ModelType") or "").strip() or None
-            if nick:
-                _LOGGER.debug("Hint from %s for %s", path, mac_u)
-                return SuggestedName(nick, model, model_type)
+        nick = (item.get("NickName") or "").strip()
+        model = (item.get("Model") or "").strip() or None
+        model_type = (item.get("ModelType") or "").strip() or None
+        if nick:
+            _LOGGER.debug("Hint for %s", mac_u)
+            return SuggestedName(nick, model, model_type)
     return None
 
 

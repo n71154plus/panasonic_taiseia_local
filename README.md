@@ -9,6 +9,11 @@ Home Assistant custom integration for **Panasonic TaiSEIA** appliances — **LAN
 
 ## Changelog
 
+### v1.7.5
+
+- Load CommandList and optional device-name hints off the Home Assistant event loop
+- Device-name hint files use the config directory instead of a hardcoded `/config` path
+
 ### v1.7.4
 
 - Cloud control re-authenticates when EMS rejects an expired CPToken (plain-text HTTP 417), then stores the new token

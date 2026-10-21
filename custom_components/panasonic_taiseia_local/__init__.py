@@ -15,6 +15,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .catalog import (
+    async_load_catalog,
     build_generic_profile,
     build_profile,
     load_catalog,
@@ -79,7 +80,13 @@ from .entry_helpers import (
 )
 from .flow_helpers import coalesce_sa_type
 from .lan_settings import async_get_lan_settings
-from .naming import async_suggest_name, format_cloud_title, format_local_title, looks_like_module_model
+from .naming import (
+    async_preload_device_hints,
+    async_suggest_name,
+    format_cloud_title,
+    format_local_title,
+    looks_like_module_model,
+)
 from .taiseia import ServiceInfo, TaiSeiaClient, configure_lan_concurrency
 
 _LOGGER = logging.getLogger(__package__)
@@ -108,6 +115,8 @@ def _setup_stagger_seconds(host: str) -> float:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
+    # CommandList is ~90 KB; read it off the loop before any sync catalog use.
+    await async_load_catalog(hass)
 
     from .services import async_register_services
 
@@ -364,6 +373,7 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         new_data["device_type"] = client.device.sa_type_id
         changed = True
 
+    await async_preload_device_hints(hass)
     suggested = async_suggest_name(hass, client.device.mac)
     new_title = entry.title
     if suggested:

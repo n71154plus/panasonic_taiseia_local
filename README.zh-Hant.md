@@ -9,6 +9,11 @@ Home Assistant 自訂整合：控制配備 **TaiSEIA** 的 Panasonic 家電，�
 
 ## 更新紀錄
 
+### v1.7.5
+
+- CommandList 與選用的裝置名稱提示改在事件迴圈外讀取
+- 名稱提示檔改走設定目錄，不再寫死 `/config`
+
 ### v1.7.4
 
 - 雲端控制遇到 CPToken 過期（HTTP 417 純文字）會重新登入取得 token，並寫回設定
