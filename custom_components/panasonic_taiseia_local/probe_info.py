@@ -477,7 +477,14 @@ def _decode_ac(service_id: int, val: int) -> str | None:
 
 
 def _decode_dehumidifier(service_id: int, val: int) -> str | None:
-    if service_id in (SVC_POWER, SVC_DH_NANOE, SVC_DH_BUZZER, SVC_DH_TANK):
+    if service_id == SVC_DH_BUZZER:
+        # TaiSEIA SAA 控制提示音：0 有聲、1 無聲。和 1=開 的開關相反。
+        if val == 0:
+            return "有聲"
+        if val == 1:
+            return "無聲"
+        return str(val)
+    if service_id in (SVC_POWER, SVC_DH_NANOE, SVC_DH_TANK):
         return _on_off(val)
     if service_id == SVC_MODE:
         return DEHUMIDIFIER_AVAILABLE_MODE.get(val, str(val))

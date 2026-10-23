@@ -43,7 +43,10 @@ def _stub_homeassistant() -> None:
 _stub_homeassistant()
 sys.path.insert(0, str(ROOT / "custom_components"))
 
-from panasonic_taiseia_local.capability import filter_option_map  # noqa: E402
+from panasonic_taiseia_local.capability import (  # noqa: E402
+    filter_option_map,
+    supported_values,
+)
 from panasonic_taiseia_local.catalog import (  # noqa: E402
     build_profile,
     dehumidifier_mode_map,
@@ -114,6 +117,48 @@ class Issue4DehumidifierCatalogTest(unittest.TestCase):
         self.assertIn(2, filtered)
         self.assertNotIn(4, filtered)
         self.assertNotIn(7, filtered)
+
+    def test_temperature_span_stays_a_range(self) -> None:
+        info = ServiceInfo(0x03, True, 16, 30)
+        self.assertEqual(supported_values(info), list(range(16, 31)))
+
+    def test_nxw_capability_is_a_16bit_mask_not_a_range(self) -> None:
+        profile = build_profile("NXW")
+        base = dehumidifier_mode_map(profile)
+        assert base is not None
+        # Reporter: min 30, max 89. That is 0x1E59, not modes 30–89.
+        client = SimpleNamespace(
+            device=SimpleNamespace(services={0x01: ServiceInfo(0x01, True, 0x1E, 0x59)})
+        )
+        filtered = filter_option_map(client, 0x01, base)
+        self.assertEqual(
+            sorted(filtered),
+            [0, 3, 4, 6],
+        )
+        self.assertEqual(filtered[0], "連續除濕")
+        self.assertEqual(filtered[3], "乾衣")
+        self.assertEqual(filtered[4], "衣物乾燥")
+        self.assertEqual(filtered[6], "濕度設定")
+        self.assertNotIn(1, filtered)
+        self.assertNotIn(7, filtered)
+        self.assertNotIn(30, filtered)
+        self.assertNotIn(89, filtered)
+
+    def test_lxw_capability_keeps_modes_the_unit_accepts(self) -> None:
+        profile = build_profile("LXW")
+        base = dehumidifier_mode_map(profile)
+        assert base is not None
+        # min 30, max 125 → 0x1E7D. Bits 1 and 7 are clear, 2 and 5 are set.
+        client = SimpleNamespace(
+            device=SimpleNamespace(services={0x01: ServiceInfo(0x01, True, 30, 125)})
+        )
+        filtered = filter_option_map(client, 0x01, base)
+        self.assertIn(0, filtered)
+        self.assertIn(2, filtered)
+        self.assertIn(5, filtered)
+        self.assertNotIn(1, filtered)
+        self.assertNotIn(7, filtered)
+        self.assertNotIn(30, filtered)
 
     def test_capability_exposes_extra_bits(self) -> None:
         profile = build_profile("NXW")
