@@ -18,6 +18,7 @@ from .const import (
     DEFAULT_REQUEST_TIMEOUT,
     DEVICE_TYPE_NAMES,
     ENTITY_SERVICES_BY_TYPE,
+    PROBED_CORE_BY_TYPE,
     REG_ALL_STATES,
     REG_MODEL,
     REG_REGISTER,
@@ -454,8 +455,15 @@ class TaiSeiaClient:
         # When ALL_STATES succeeded, only backfill core entity services — not the
         # full CommandList (avoids N sequential reads every poll).
         fill = base if all_states_ok and states else poll
+        probed = self.device.services or {}
+        extra = PROBED_CORE_BY_TYPE.get(self.device.sa_type_id, frozenset())
+        fill = list(dict.fromkeys([*fill, *[s for s in sorted(extra) if s not in probed]]))
         for svc in fill:
-            if svc not in states and (not self.device.services or svc in self.device.services):
+            if svc in states:
+                continue
+            if not probed or svc in probed or svc in PROBED_CORE_BY_TYPE.get(
+                self.device.sa_type_id, frozenset()
+            ):
                 try:
                     states[svc] = await self.async_read_device(svc)
                 except Exception:  # noqa: BLE001

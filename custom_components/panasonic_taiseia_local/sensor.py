@@ -81,7 +81,9 @@ async def async_setup_entry(hass, entry, async_add_entities) -> bool:
         sid = item.command.service
         if sid in seen:
             continue
-        if not service_allowed(client.device.services, sid):
+        if not service_allowed(
+            client.device.services, sid, client.device.sa_type_id
+        ):
             continue
         seen.add(sid)
         hint = item.device_class_hint
@@ -129,6 +131,21 @@ async def async_setup_entry(hass, entry, async_add_entities) -> bool:
                     unit=UnitOfPower.WATT,
                     signed=False,
                     require_power=True,
+                )
+            )
+        elif hint == "pm10":
+            entities.append(
+                TaiSeiaNumericSensor(
+                    coordinator,
+                    client,
+                    entry.entry_id,
+                    service=sid,
+                    label_suffix=item.command.name,
+                    icon_name=item.icon,
+                    key=f"sensor_{sid:02x}",
+                    device_class=SensorDeviceClass.PM10,
+                    unit=CONCENTRATION_MICROGRAMS_PER_CUBIC_METER,
+                    signed=False,
                 )
             )
         elif hint == "pm25":
