@@ -6,7 +6,10 @@ from dataclasses import dataclass, field
 import json
 import logging
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from homeassistant.core import HomeAssistant
 
 from homeassistant.components.climate import HVACMode
 
@@ -74,6 +77,15 @@ _AC_SERVICE_KIND: dict[int, str] = {
     0x33: "sensor",
     0x38: "binary_sensor",  # PM2.5 旗標
 }
+# MHW/F-YV air-quality services: absent from the module's advertised service
+# list (12 entries) yet readable over LAN — verified on F-YV32MH via
+# read_service (0x53=PM2.5, 0x56=PM1.0, 0x52=PM Level, 0x51=odor).
+_EXTRA_DH_SENSORS = (
+    (0x53, "PM2.5", "pm25"),
+    (0x56, "PM1.0", "pm10"),
+    (0x52, "PM Level", None),
+)
+
 _EXTRA_RF_SENSORS = (
     (0x03, "冷凍溫度", "temperature"),
     (0x05, "冷藏溫度", "temperature"),
@@ -241,6 +253,13 @@ def load_catalog() -> dict[str, dict[str, Any]]:
     _CATALOG = catalog
     _LOGGER.debug("Loaded CommandList: %s ModelTypes", len(catalog))
     return catalog
+
+
+async def async_load_catalog(hass: HomeAssistant) -> dict[str, dict[str, Any]]:
+    """Load CommandList off the event loop. Later calls reuse the cache."""
+    if _CATALOG is not None:
+        return _CATALOG
+    return await hass.async_add_executor_job(load_catalog)
 
 
 def list_model_types(device_type: int | None = None) -> list[str]:
@@ -722,12 +741,23 @@ def climate_temp_limits(profile: DeviceProfile | None) -> tuple[int | None, int 
 
 
 def dehumidifier_mode_map(profile: DeviceProfile | None) -> dict[int, str] | None:
+    """Return 0x01 mode labels for a dehumidifier profile.
+
+    Merges the ModelType CommandList with the shared fallback map so capability
+    bits beyond a sparse App list (e.g. 防霉抑菌 / 送風 on LXW/NXW) still get
+    human labels when the module advertises them.
+    """
+    from .const import DEHUMIDIFIER_AVAILABLE_MODE
+
+    base = dict(DEHUMIDIFIER_AVAILABLE_MODE)
     if not profile:
-        return None
+        return base
     cmd = get_command(profile, 0x01)
     if not cmd or cmd.parameter_type != "enum":
-        return None
-    return parse_enum_params(cmd.parameters)
+        return base
+    # Profile-specific labels win (e.g. NXW 智慧節能 vs generic 自動除濕).
+    base.update(parse_enum_params(cmd.parameters))
+    return base
 
 
 def dehumidifier_humidity_map(profile: DeviceProfile | None) -> dict[int, int] | None:
@@ -751,11 +781,21 @@ def iter_kind(profile: DeviceProfile, kind: EntityKind):
             yield item
 
 
-def service_allowed(client_services: dict, service: int) -> bool:
-    """If device reported a service list, require membership; else allow."""
+def service_allowed(
+    client_services: dict, service: int, sa_type_id: int | None = None
+) -> bool:
+    """If device reported a service list, require membership; else allow.
+
+    ``PROBED_CORE_BY_TYPE`` services are answered despite being absent from
+    the advertisement, so they pass the gate too.
+    """
     if not client_services:
         return True
-    return service in client_services
+    if service in client_services:
+        return True
+    from .const import PROBED_CORE_BY_TYPE
+
+    return service in PROBED_CORE_BY_TYPE.get(int(sa_type_id or 0), frozenset())
 
 
 def extra_local_sensors(sa_type_id: int, profile: DeviceProfile | None) -> list[ClassifiedCommand]:
@@ -764,6 +804,18 @@ def extra_local_sensors(sa_type_id: int, profile: DeviceProfile | None) -> list[
     extras: list[ClassifiedCommand] = []
     if sa_type_id == TYPE_AC:
         for sid, name, hint in _EXTRA_AC_SENSORS:
+            if sid in present:
+                continue
+            extras.append(
+                ClassifiedCommand(
+                    command=CommandDef(sid, name, "", [], ""),
+                    kind="sensor",
+                    icon=_icon_for(name),
+                    device_class_hint=hint,
+                )
+            )
+    elif sa_type_id == TYPE_DEHUMIDIFIER:
+        for sid, name, hint in _EXTRA_DH_SENSORS:
             if sid in present:
                 continue
             extras.append(

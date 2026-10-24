@@ -76,6 +76,7 @@
           "password": "Update password (leave blank to keep)",
           "refresh_cloud": "Re-login and refresh tokens",
           "name": "Display name",
+          "host": "LAN host IP (blank / 0.0.0.0 = cloud-only; set a reachable IP to unlock local/hybrid)",
           "indoor_model": "Indoor model (optional)",
           "model_type": "ModelType (CommandList)",
           "update_interval": "Poll interval (seconds, this device)",

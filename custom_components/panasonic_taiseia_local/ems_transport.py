@@ -176,6 +176,37 @@ def classify_state_msg(msg: str | None) -> type[Exception] | None:
     return None
 
 
+def exception_from_body(text: str | None) -> Exception | None:
+    """Map an EMS body to a typed error.
+
+    Live EMS returns CPToken expiry as HTTP 417 with a plain-text body
+    (``此CPToken已經逾時``), not a JSON ``StateMsg``. JSON ``StateMsg`` is
+    still recognized.
+    """
+    if not text:
+        return None
+    messages: list[str] = []
+    try:
+        import json as _json
+
+        payload = _json.loads(text)
+    except Exception:  # noqa: BLE001
+        payload = None
+    if isinstance(payload, dict):
+        state_msg = payload.get("StateMsg")
+        if isinstance(state_msg, str) and state_msg.strip():
+            messages.append(state_msg)
+    elif isinstance(payload, str) and payload.strip():
+        messages.append(payload)
+    messages.append(text)
+    for msg in messages:
+        cls = classify_state_msg(msg)
+        if cls is None:
+            continue
+        return cls(str(msg)[:200])
+    return None
+
+
 class EmsTransport:
     """HTTP helper with per-base cooldown and optional multi-base failover."""
 
@@ -276,6 +307,27 @@ class EmsTransport:
                     timeout=timeout,
                 ) as resp:
                     text = await resp.text()
+                    # CPToken expiry is often a raw 417 body, not JSON StateMsg.
+                    # Only treat rate-limit / offline on non-OK so a normal
+                    # status payload cannot match those fragments by accident.
+                    body_exc = exception_from_body(text)
+                    if isinstance(body_exc, CloudAuthError):
+                        raise body_exc
+                    if resp.status != HTTPStatus.OK and isinstance(
+                        body_exc, CloudDeviceOffline
+                    ):
+                        raise body_exc
+                    if resp.status != HTTPStatus.OK and isinstance(
+                        body_exc, CloudRateLimited
+                    ):
+                        last_rate = True
+                        self._mark_blocked(
+                            base,
+                            self.settings.rate_limit_backoff,
+                            "StateMsg rate limit",
+                        )
+                        continue
+
                     if resp.status == HTTPStatus.OK:
                         if not expect_json:
                             return text
@@ -302,31 +354,6 @@ class EmsTransport:
                             base, self.settings.waf_backoff, f"WAF {resp.status}"
                         )
                         continue
-
-                    # 417 Expectation Failed — EMS often puts StateMsg here
-                    state_msg = None
-                    try:
-                        import json as _json
-
-                        payload = _json.loads(text) if text else {}
-                        if isinstance(payload, dict):
-                            state_msg = payload.get("StateMsg")
-                    except Exception:  # noqa: BLE001
-                        payload = {}
-
-                    cls = classify_state_msg(str(state_msg) if state_msg else None)
-                    if cls is CloudRateLimited:
-                        last_rate = True
-                        self._mark_blocked(
-                            base,
-                            self.settings.rate_limit_backoff,
-                            "StateMsg rate limit",
-                        )
-                        continue
-                    if cls is CloudAuthError:
-                        raise CloudAuthError(str(state_msg)[:200])
-                    if cls is CloudDeviceOffline:
-                        raise CloudDeviceOffline(str(state_msg)[:200])
 
                     last_err = text[:200]
                     if resp.status >= 400:

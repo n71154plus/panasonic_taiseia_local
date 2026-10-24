@@ -9,6 +9,19 @@ Home Assistant custom integration for **Panasonic TaiSEIA** appliances — **LAN
 
 ## Changelog
 
+### v1.7.5
+
+- **Cloud appliance powered off:** EMS `503:DeviceJPInfo` (the module drops offline when the panel is off, or the appliance is unplugged) no longer fails setup. The entry loads, entities stay unavailable, and the next poll recovers them.
+- **PIOT-V2 LAN probe:** modules that answer `FFFFFFFFFFFF` to the REGISTER read still expose type, model, services, and states. A reachable TCP 57223 device is no longer imported as cloud-only because of that one rejection.
+- **Air conditioner turn on:** `climate.turn_on` resumes the last mode kept in register `0x01`, instead of Home Assistant's heat-first default. With no usable history it falls back to cool.
+- **Dehumidifier LAN unlock (F-YV32LX / LXW):** setup retries MAC rediscovery, EMS `UserGetGWIP`, and a LAN probe for cloud-only entries. Device options accept a host IP; a reachable address clears the cloud-only lock and restores hybrid or local control. Adding the same MAC again upgrades the old cloud-only entry.
+- **Dehumidifier modes (F-YV28NX / NXW and LXW):** CommandList `0x01` adds 智慧節能, 防霉抑菌, and 送風 when the module capability bitmask includes them. Fan `0x0E` labels are 靜音除濕 and 快速除濕. 烘鞋衣櫃 stays panel-only, the same limit as the official app.
+- **Event loop:** the CommandList is read off the loop before setup, the config flow, and cloud sync. Optional nickname files use `hass.config.path()` and are loaded in an executor, so a missing file no longer calls `open()` on the loop.
+
+### v1.7.4
+
+- Cloud control re-authenticates when EMS rejects an expired CPToken (plain-text HTTP 417), then stores the new token
+
 ### v1.7.3
 
 - Platform entities only follow probed SA type (not catalog profile)
@@ -127,7 +140,8 @@ Copy `custom_components/panasonic_taiseia_local` into your HA `custom_components
 
 1. **EMS account import** (recommended): hub login, then multi-select devices (LAN and/or cloud-only)
 2. **Discovery** / **manual IP** for LAN modules
-3. Per device: name, ModelType, poll interval, **control path**, energy options
+3. Per device: name, **LAN host IP**, ModelType, poll interval, **control path**, energy options
+4. If a unit was imported cloud-only but TCP 57223 is open: set the LAN IP in device options (or reload so setup retries GWIP/MAC discovery) to unlock local/hybrid
 
 ## Dynamic IP (DHCP)
 
