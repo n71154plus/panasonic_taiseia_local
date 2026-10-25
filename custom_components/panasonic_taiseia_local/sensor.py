@@ -12,6 +12,7 @@ from homeassistant.const import (
     CONCENTRATION_MICROGRAMS_PER_CUBIC_METER,
     EntityCategory,
     PERCENTAGE,
+    UnitOfElectricCurrent,
     UnitOfEnergy,
     UnitOfPower,
     UnitOfTemperature,
@@ -115,6 +116,39 @@ async def async_setup_entry(hass, entry, async_add_entities) -> bool:
                     device_class=SensorDeviceClass.HUMIDITY,
                     unit=PERCENTAGE,
                     signed=False,
+                )
+            )
+        elif hint == "current":
+            entities.append(
+                TaiSeiaNumericSensor(
+                    coordinator,
+                    client,
+                    entry.entry_id,
+                    service=sid,
+                    label_suffix=item.command.name,
+                    icon_name=item.icon,
+                    key=f"sensor_{sid:02x}",
+                    device_class=SensorDeviceClass.CURRENT,
+                    unit=UnitOfElectricCurrent.AMPERE,
+                    signed=False,
+                    require_power=True,
+                )
+            )
+        elif hint == "energy":
+            entities.append(
+                TaiSeiaNumericSensor(
+                    coordinator,
+                    client,
+                    entry.entry_id,
+                    service=sid,
+                    label_suffix=item.command.name,
+                    icon_name=item.icon,
+                    key=f"sensor_{sid:02x}",
+                    device_class=SensorDeviceClass.ENERGY,
+                    unit=UnitOfEnergy.KILO_WATT_HOUR,
+                    signed=False,
+                    scale=0.1,
+                    state_class=SensorStateClass.TOTAL_INCREASING,
                 )
             )
         elif hint == "power":
@@ -465,6 +499,8 @@ class TaiSeiaNumericSensor(TaiSeiaBaseEntity, SensorEntity):
         unit: str | None,
         signed: bool,
         require_power: bool = False,
+        scale: float | None = None,
+        state_class: SensorStateClass | None = None,
     ) -> None:
         self._service = service
         self._status_key = f"0x{service:02X}"
@@ -473,6 +509,9 @@ class TaiSeiaNumericSensor(TaiSeiaBaseEntity, SensorEntity):
         self._entity_key = key
         self._signed = signed
         self._require_power = require_power
+        self._scale = scale
+        if state_class:
+            self._attr_state_class = state_class
         if device_class:
             self._attr_device_class = device_class
         if unit:
@@ -498,7 +537,10 @@ class TaiSeiaNumericSensor(TaiSeiaBaseEntity, SensorEntity):
         raw = self.status_int(self._status_key, -1)
         if raw < 0 or raw == 0xFFFF:
             return None
-        return _signed(raw) if self._signed else raw
+        value = _signed(raw) if self._signed else raw
+        if self._scale is not None:
+            return round(value * self._scale, 2)
+        return value
 
 
 class TaiSeiaGenericSensor(TaiSeiaBaseEntity, SensorEntity):

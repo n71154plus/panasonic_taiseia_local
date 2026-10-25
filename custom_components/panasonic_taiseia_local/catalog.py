@@ -39,9 +39,9 @@ _EXTRA_AC_SENSORS = (
     (0x14, "室內濕度", "humidity"),
     (0x15, "系統點檢", None),
     (0x21, "室外溫度", "temperature"),
-    (0x22, "室內機耗電", "energy"),
-    (0x23, "室外機耗電", "energy"),
-    (0x24, "室外機電流", None),
+    (0x22, "室內機耗電", None),  # undocumented constant on many models, not kWh
+    (0x23, "室外機耗電", None),
+    (0x24, "室外機電流", "current"),  # compressor current in A (verified vs 0x27)
     (0x27, "即時功率", "power"),
     (0x29, "顯示錯誤", None),
     (0x37, "PM2.5", "pm25"),
@@ -65,6 +65,7 @@ _AC_SERVICE_KIND: dict[int, str] = {
     0x24: "sensor",
     0x25: "sensor",
     0x26: "sensor",
+    0x27: "sensor",  # 即時功率: RO with span 0 (255–255) would otherwise hit the binary heuristic
     0x28: "sensor",
     0x29: "sensor",
     0x2A: "sensor",
@@ -392,12 +393,16 @@ def _sensor_hint(name: str) -> str | None:
         return "temperature"
     if "濕" in name:
         return "humidity"
+    if "電流" in name:
+        return "current"
+    if "功率因數" in name:
+        return None  # dimensionless, not power
     if "即時功率" in name or name.endswith("功率"):
         return "power"
-    if "耗電" in name:
+    if "耗電" in name and ("累計" in name or "本月" in name or "本期" in name):
+        # Energy counters (0x28/0x33) tick in 0.1 kWh units; per-unit 耗電
+        # registers (0x22/0x23) are undocumented and often constant.
         return "energy"
-    if "功率" in name:
-        return "power"
     if "PM" in name.upper() or "pm" in name.lower():
         return "pm25"
     return None
