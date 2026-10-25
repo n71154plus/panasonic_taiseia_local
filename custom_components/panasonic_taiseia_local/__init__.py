@@ -574,6 +574,9 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     entry_id = entry.entry_id
     last_rediscover_mono = 0.0
+    # Cloud Power report (UserGetInfo name=Power): official-app monthly kWh for
+    # appliances without LAN power telemetry. Refreshed at most hourly.
+    power_report: list = [0.0, None]  # [mono_ts, kwh|None]
 
     control = DeviceControl(
         hass,
@@ -665,6 +668,28 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             live = hass.config_entries.async_get_entry(entry_id)
             live_data = live.data if live else new_data
             live_entry = live or entry
+
+            # Official-app monthly kWh via cloud Power report (hourly-cached).
+            cloud_month_kwh = power_report[1]
+            if (
+                not has_power
+                and energy_enabled
+                and (live_data.get(CONF_CLOUD_GWID) or "")
+                and time.monotonic() - power_report[0] > 3600
+            ):
+                try:
+                    cloud = await control._cloud_account()  # noqa: SLF001
+                    creds_gwid = (live_data.get(CONF_CLOUD_GWID) or "").strip()
+                    if cloud is not None:
+                        report = await cloud.async_get_power_report()
+                        cloud_month_kwh = (
+                            report.get(creds_gwid, {}).get("total_kwh")
+                        )
+                        power_report[0] = time.monotonic()
+                        power_report[1] = cloud_month_kwh
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.debug("cloud power report failed: %s", err)
+
             return {
                 "status": status,
                 "device": client.device,
@@ -696,6 +721,7 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 ),
                 "energy_include_house": include_house,
                 "has_power_energy": bool(has_power and energy_enabled),
+                "energy_cloud_month_kwh": cloud_month_kwh,
                 "poll_interval": _interval(live) if live else _interval(entry),
                 "lan_timeout": lan.timeout,
                 "lan_retries": lan.retries,
