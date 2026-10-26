@@ -247,7 +247,7 @@ class TaiSeiaEnergySensor(TaiSeiaBaseEntity, SensorEntity):
             "period": data.get("energy_period_key") or data.get("energy_month_key"),
             "cycle": data.get("energy_cycle"),
             "cycle_days": data.get("energy_cycle_days"),
-            "method": "left_riemann_from_operating_power",
+            "method": "left_riemann_while_indoor_on",
         }
 
 
