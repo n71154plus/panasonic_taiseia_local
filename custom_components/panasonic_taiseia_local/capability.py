@@ -8,25 +8,38 @@ from .taiseia import ServiceInfo, TaiSeiaClient
 _BITMASK_MAXIMA = frozenset({1, 3, 7, 15, 31, 63, 127, 255})
 
 
+# A real min/max such as temperature 16–30. Wider pairs are a 16-bit
+# support mask: bit N means value N. NXW reports 0x1E 0x59, which is not
+# the range 30–89.
+_CONTIGUOUS_SPAN = 16
+
+
 def looks_like_bitmask(info: ServiceInfo) -> bool:
     """Enum-style services encode supported values as a bit field in max_value."""
     return info.min_value == 0 and info.max_value in _BITMASK_MAXIMA
+
+
+def _bitmask_values(mask: int) -> list[int]:
+    return [i for i in range(16) if mask & (1 << i)]
 
 
 def supported_values(info: ServiceInfo | None, fallback: list[int] | None = None) -> list[int]:
     """Return supported numeric values for a service descriptor."""
     if info is None:
         return list(fallback or [])
+    hi = int(info.min_value)
+    lo = int(info.max_value)
+    if not (0 <= hi <= 0xFF and 0 <= lo <= 0xFF):
+        if lo > hi >= 0 and lo - hi <= 200:
+            return list(range(hi, lo + 1))
+        return list(fallback or [])
     if looks_like_bitmask(info):
-        return [i for i in range(16) if info.max_value & (1 << i)]
-    if info.min_value <= info.max_value:
-        # Continuous / discrete range (e.g. temperature 16–30, timer 5–160)
-        hi = info.max_value
-        lo = info.min_value
-        if hi - lo > 200:
-            return list(fallback or [])
-        return list(range(lo, hi + 1))
-    return list(fallback or [])
+        return _bitmask_values(lo)
+    if hi <= lo and lo - hi <= _CONTIGUOUS_SPAN:
+        return list(range(hi, lo + 1))
+    # Two-byte enum capability. 0x1E59 supports values 0, 3, 4, 6, …
+    bits = _bitmask_values((hi << 8) | lo)
+    return bits or list(fallback or [])
 
 
 def filter_option_map(

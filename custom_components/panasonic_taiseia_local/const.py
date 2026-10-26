@@ -286,6 +286,9 @@ DEHUMIDIFIER_AVAILABLE_MODE = {
     0: "連續除濕",
     1: "自動除濕",  # LXW/NXW CommandList: 智慧節能 (ECONAVI)
     2: "防霉抑菌",
+    # TaiSEIA 運轉模式 3 是乾衣。Panasonic 指令表沒有這個代碼，
+    # 但 NXW/LXW 的能力位元有它，機器也會回報 3。
+    3: "乾衣",
     4: "衣物乾燥",
     5: "保持乾燥",
     6: "濕度設定",
