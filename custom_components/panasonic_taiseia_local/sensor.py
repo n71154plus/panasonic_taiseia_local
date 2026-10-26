@@ -23,6 +23,7 @@ from homeassistant.helpers.typing import StateType
 from .catalog import extra_local_sensors, iter_kind, service_allowed
 from .cloud_sync import cloud_attrs_from_entry, hub_device_identifier
 from .const import (
+    CONF_CLOUD_GWID,
     CONF_ENERGY_ENABLED,
     CONF_ENERGY_INCLUDE_HOUSE,
     CONF_ENTRY_TYPE,
@@ -234,6 +235,19 @@ async def async_setup_entry(hass, entry, async_add_entities) -> bool:
                 suggested_object_id=f"taiseia_{mac}_total_energy",
             )
         )
+    elif (
+        entry.options.get(CONF_ENERGY_ENABLED, True)
+        and entry.data.get(CONF_CLOUD_GWID)
+    ):
+        # No LAN power telemetry (e.g. MHW dehumidifiers): expose the
+        # official-app monthly kWh from the cloud Power report instead.
+        entities.append(
+            TaiSeiaCloudEnergySensor(
+                coordinator,
+                client,
+                entry.entry_id,
+            )
+        )
 
     # Legacy: no hub yet → keep house total on first device entry
     if not _hub_exists(hass):
@@ -300,6 +314,26 @@ class TaiSeiaEnergySensor(TaiSeiaBaseEntity, SensorEntity):
             "cycle_days": data.get("energy_cycle_days"),
             "method": "left_riemann_while_indoor_on",
         }
+
+
+class TaiSeiaCloudEnergySensor(TaiSeiaBaseEntity, SensorEntity):
+    """Current-month kWh from the cloud Power report (no LAN power service)."""
+
+    _entity_key = "cloud_monthly_energy"
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_suggested_display_precision = 1
+
+    @property
+    def label(self) -> str:
+        return "本月耗電（雲端）"
+
+    @property
+    def native_value(self) -> float | None:
+        data = self.coordinator.data or {}
+        value = data.get("energy_cloud_month_kwh")
+        return float(value) if value is not None else None
 
 
 class TaiSeiaHouseMonthlyEnergySensor(SensorEntity):

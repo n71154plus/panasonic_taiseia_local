@@ -38,6 +38,7 @@ _GW_IP = "/UserGetGWIP"
 _SET_COMMAND = "/DeviceSetCommand"
 _GET_INFO = "/DeviceGetInfo"
 _OVERVIEW = "/UserGetDeviceStatus"
+_USER_INFO = "/UserGetInfo"
 
 # One in-flight re-login per account so parallel cloud polls do not stampede EMS.
 _reauth_locks: dict[str, asyncio.Lock] = {}
@@ -468,4 +469,50 @@ class CloudAccount:
                 status[key] = str(raw)
             if gwid:
                 result[gwid] = status
+        return result
+
+    async def async_get_power_report(
+        self,
+        *,
+        days: int = 31,
+        priority: RequestPriority = RequestPriority.BACKGROUND,
+    ) -> dict[str, dict[str, float]]:
+        """UserGetInfo name=Power — per-device current-month kWh total.
+
+        Returns ``{gwid: {"total_kwh": float}}``. This is the endpoint the
+        official app's electricity screen reads; it covers appliances without
+        LAN power telemetry (e.g. MHW dehumidifiers).
+        """
+        from datetime import datetime
+
+        async def _call():
+            assert self.cp_token
+            return await self._raw(
+                "POST",
+                _USER_INFO,
+                headers={"CPToken": self.cp_token, "cptoken": self.cp_token},
+                json_body={
+                    "name": "Power",
+                    "from": datetime.today().replace(day=1).strftime("%Y/%m/%d"),
+                    "unit": "day",
+                    "max_num": days,
+                },
+                priority=priority,
+            )
+
+        data = await self._with_auth_retry(_call)
+        result: dict[str, dict[str, float]] = {}
+        if not isinstance(data, dict):
+            return result
+        for device in data.get("GwList") or []:
+            if not isinstance(device, dict):
+                continue
+            gwid = str(device.get("GwID") or device.get("GWID") or "")
+            total = device.get("Total_kwh")
+            if not gwid or total is None:
+                continue
+            try:
+                result[gwid] = {"total_kwh": float(total)}
+            except (TypeError, ValueError):
+                continue
         return result
