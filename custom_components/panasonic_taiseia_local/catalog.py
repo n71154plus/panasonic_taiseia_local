@@ -77,6 +77,15 @@ _AC_SERVICE_KIND: dict[int, str] = {
     0x33: "sensor",
     0x38: "binary_sensor",  # PM2.5 旗標
 }
+# MHW/F-YV air-quality services: absent from the module's advertised service
+# list (12 entries) yet readable over LAN — verified on F-YV32MH via
+# read_service (0x53=PM2.5, 0x56=PM1.0, 0x52=PM Level, 0x51=odor).
+_EXTRA_DH_SENSORS = (
+    (0x53, "PM2.5", "pm25"),
+    (0x56, "PM1.0", "pm10"),
+    (0x52, "PM Level", None),
+)
+
 _EXTRA_RF_SENSORS = (
     (0x03, "冷凍溫度", "temperature"),
     (0x05, "冷藏溫度", "temperature"),
@@ -772,11 +781,21 @@ def iter_kind(profile: DeviceProfile, kind: EntityKind):
             yield item
 
 
-def service_allowed(client_services: dict, service: int) -> bool:
-    """If device reported a service list, require membership; else allow."""
+def service_allowed(
+    client_services: dict, service: int, sa_type_id: int | None = None
+) -> bool:
+    """If device reported a service list, require membership; else allow.
+
+    ``PROBED_CORE_BY_TYPE`` services are answered despite being absent from
+    the advertisement, so they pass the gate too.
+    """
     if not client_services:
         return True
-    return service in client_services
+    if service in client_services:
+        return True
+    from .const import PROBED_CORE_BY_TYPE
+
+    return service in PROBED_CORE_BY_TYPE.get(int(sa_type_id or 0), frozenset())
 
 
 def extra_local_sensors(sa_type_id: int, profile: DeviceProfile | None) -> list[ClassifiedCommand]:
@@ -785,6 +804,18 @@ def extra_local_sensors(sa_type_id: int, profile: DeviceProfile | None) -> list[
     extras: list[ClassifiedCommand] = []
     if sa_type_id == TYPE_AC:
         for sid, name, hint in _EXTRA_AC_SENSORS:
+            if sid in present:
+                continue
+            extras.append(
+                ClassifiedCommand(
+                    command=CommandDef(sid, name, "", [], ""),
+                    kind="sensor",
+                    icon=_icon_for(name),
+                    device_class_hint=hint,
+                )
+            )
+    elif sa_type_id == TYPE_DEHUMIDIFIER:
+        for sid, name, hint in _EXTRA_DH_SENSORS:
             if sid in present:
                 continue
             extras.append(

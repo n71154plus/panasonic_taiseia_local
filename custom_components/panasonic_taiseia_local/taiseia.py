@@ -18,6 +18,7 @@ from .const import (
     DEFAULT_REQUEST_TIMEOUT,
     DEVICE_TYPE_NAMES,
     ENTITY_SERVICES_BY_TYPE,
+    PROBED_CORE_BY_TYPE,
     REG_ALL_STATES,
     REG_MODEL,
     REG_REGISTER,
@@ -431,6 +432,8 @@ class TaiSeiaClient:
         """Fetch ALL_STATES and normalize to status dict."""
         base = ENTITY_SERVICES_BY_TYPE.get(self.device.sa_type_id, [])
         poll = list(dict.fromkeys([*base, *self.poll_services]))
+        probed = self.device.services or {}
+        extra = PROBED_CORE_BY_TYPE.get(self.device.sa_type_id, frozenset())
         try:
             resp = await self.async_read(TYPE_REGISTER, REG_ALL_STATES)
             states = parse_all_states(resp)
@@ -445,7 +448,7 @@ class TaiSeiaClient:
             limit = max(len(base), 24) if base else 24
             poll = poll[:limit]
             for svc in poll:
-                if self.device.services and svc not in self.device.services:
+                if probed and svc not in probed and svc not in extra:
                     continue
                 try:
                     states[svc] = await self.async_read_device(svc)
@@ -454,8 +457,11 @@ class TaiSeiaClient:
         # When ALL_STATES succeeded, only backfill core entity services — not the
         # full CommandList (avoids N sequential reads every poll).
         fill = base if all_states_ok and states else poll
+        fill = list(dict.fromkeys([*fill, *[s for s in sorted(extra) if s not in probed]]))
         for svc in fill:
-            if svc not in states and (not self.device.services or svc in self.device.services):
+            if svc in states:
+                continue
+            if not probed or svc in probed or svc in extra:
                 try:
                     states[svc] = await self.async_read_device(svc)
                 except Exception:  # noqa: BLE001
