@@ -45,6 +45,34 @@ def filter_option_map(
     return filtered or dict(option_map)
 
 
+# Longer than a week is not a TaiSEIA timer ceiling.
+_TIMER_CEILING_LIMIT = 7 * 24 * 60
+
+
+def timer_ceiling(info: ServiceInfo) -> int | None:
+    """Return the timer maximum advertised by a service-list entry.
+
+    Timer entries store one big-endian maximum, not separate min and max
+    bytes. ``0x05 0xA0`` is 1440 minutes (24 h). Treating those bytes as
+    min=5 and max=160 caps the slider at 160.
+    """
+    try:
+        hi_b = int(info.min_value)
+        lo_b = int(info.max_value)
+    except (TypeError, ValueError):
+        return None
+    if 0 <= hi_b <= 0xFF and 0 <= lo_b <= 0xFF:
+        ceiling = (hi_b << 8) | lo_b
+    elif lo_b > hi_b >= 0:
+        # Synthetic ServiceInfo that already holds a decoded maximum.
+        ceiling = lo_b
+    else:
+        return None
+    if ceiling <= 0 or ceiling > _TIMER_CEILING_LIMIT:
+        return None
+    return ceiling
+
+
 def timer_limits(
     client: TaiSeiaClient,
     service: int,
@@ -53,12 +81,9 @@ def timer_limits(
 ) -> tuple[int, int]:
     """Return (min, max) for timer numbers; always allow 0 = off."""
     info = client.device.services.get(service)
-    if not info:
+    if info is None:
         return default_min, default_max
-    lo, hi = info.min_value, info.max_value
-    # Device may advertise step-range like 5–160; keep 0 for disable
-    if 0 < lo <= hi <= 2000:
-        return 0, hi
-    if lo == 0 and 0 < hi <= 2000:
-        return 0, hi
-    return default_min, default_max
+    ceiling = timer_ceiling(info)
+    if ceiling is None:
+        return default_min, default_max
+    return 0, ceiling
