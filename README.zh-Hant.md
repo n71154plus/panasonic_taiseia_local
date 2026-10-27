@@ -3,13 +3,12 @@
 Home Assistant 自訂整合：控制配備 **TaiSEIA** 的 Panasonic 家電，支援**區網 LAN**與台灣 **EMS 雲端**，並可**每機選擇**控制路徑。
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
+[![Release](https://img.shields.io/github/v/release/n71154plus/panasonic_taiseia_local?label=v1.7.6)](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.6)
 [![Validate](https://github.com/n71154plus/panasonic_taiseia_local/actions/workflows/validate.yml/badge.svg)](https://github.com/n71154plus/panasonic_taiseia_local/actions/workflows/validate.yml)
 
 > **English:** [README.md](README.md)
 
-## 更新紀錄
-
-### v1.7.6
+## 最新版本 v1.7.6 變更摘要
 
 - **定時上限（#7 / #12）：** 服務清單兩個位元組解成一個 big-endian 上限。冷氣關機定時 `0x05 0xA0` 是 1440 分鐘，不再被拆成 5～160。
 - **冷氣耗電（#13）：** `0x27` 是室外機功率，一對多會複製到每台室內機。室內機電源關閉時不再累加，對齊官方 App `UserGetInfo`（未開的書房／廚房本月為 0）。
@@ -18,6 +17,14 @@ Home Assistant 自訂整合：控制配備 **TaiSEIA** 的 Panasonic 家電，�
 - **冷氣功率實體（#16）：** 即時功率正確標成瓦特感測器；電流／累計耗電不再被 span=0 誤判成開關。
 - **除濕機空品（#15）：** 即使服務清單（0x07）沒列齊，仍會探測並顯示 PM2.5、PM1.0、PM Level、異味。
 - **雲端本月耗電（#17）：** 沒有區網功率服務的機種改讀官方 App 的 Power 回報（`UserGetInfo`），提供本月度數。
+
+完整說明見 [Release v1.7.6](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.6)。
+
+## 更新紀錄
+
+### v1.7.6
+
+- 見上方「最新版本 v1.7.6 變更摘要」。
 
 ### v1.7.5
 
