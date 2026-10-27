@@ -21,6 +21,7 @@ from .const import (
     DEHUMIDIFIER_AVAILABLE_MODE,
     DEVICE_TYPE_NAMES,
     LABEL_BUZZER,
+    LABEL_DH_BUZZER,
     LABEL_CLIMATE_CLEAN,
     LABEL_CLIMATE_INDICATOR,
     LABEL_CLIMATE_MOLD_PREVENTION,
@@ -193,7 +194,7 @@ _LABELS_DEHUMIDIFIER: dict[int, str] = {
     SVC_DH_TANK: LABEL_TANK,
     SVC_DH_NANOE: "nanoeX(脫臭)",  # 少數機種僅 nanoe → ModelType 覆寫
     SVC_DH_FAN: LABEL_DH_FAN,
-    SVC_DH_BUZZER: LABEL_BUZZER,
+    SVC_DH_BUZZER: LABEL_DH_BUZZER,
     0x50: "錯誤訊息警告",
     0x51: "異味偵測",
     0x52: "PM Level",

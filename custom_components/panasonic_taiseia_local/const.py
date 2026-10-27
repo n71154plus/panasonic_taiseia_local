@@ -1,5 +1,7 @@
 """Constants for Panasonic TaiSEIA local integration."""
 
+from __future__ import annotations
+
 from homeassistant.components.climate import HVACMode
 
 DOMAIN = "panasonic_taiseia_local"
@@ -293,17 +295,19 @@ DEHUMIDIFIER_AVAILABLE_HUMIDITY = {
     0: 40, 1: 45, 2: 50, 3: 55, 4: 60, 5: 65, 6: 70,
 }
 # Panasonic App / panel labels for dehumidifier 0x01 (ModelType may rename a few).
+# NXW/LXW local codes (verified on F-YV28NX / F-YV32LX): 3=送風, 9=節能.
+# Official CommandList still lists 送風 as 7; the module bitmap decides which
+# code is offered. JHW renames 7 to 空氣清淨.
 DEHUMIDIFIER_AVAILABLE_MODE = {
     0: "連續除濕",
-    1: "自動除濕",  # LXW/NXW CommandList: 智慧節能 (ECONAVI)
+    1: "自動除濕",  # LXW/NXW CommandList: 智慧節能 (ECONAVI) — often unset locally
     2: "防霉抑菌",
-    # TaiSEIA 運轉模式 3 是乾衣。Panasonic 指令表沒有這個代碼，
-    # 但 NXW/LXW 的能力位元有它，機器也會回報 3。
-    3: "乾衣",
+    3: "送風",
     4: "衣物乾燥",
     5: "保持乾燥",
     6: "濕度設定",
-    7: "送風",  # JHW catalog uses 空氣清淨 for the same code
+    7: "送風",
+    9: "節能",
 }
 DEHUMIDIFIER_AVAILABLE_FAN = {
     0: "自動",
@@ -323,6 +327,8 @@ LABEL_NANOE = "nanoe"
 LABEL_NANOEX = "nanoeX"
 LABEL_ECONAVI = "ECONAVI"
 LABEL_BUZZER = "操作提示音"
+# Dehumidifier 0x18 beeps on remote/LAN writes, not panel keypresses.
+LABEL_DH_BUZZER = "遠端控制提示音"
 LABEL_TURBO = "急速"
 LABEL_CLIMATE_SLEEP = "睡眠"
 LABEL_CLIMATE_MOLD_PREVENTION = "乾燥防霉"
@@ -409,7 +415,7 @@ NUMBER_DEFINITIONS_AC = [
 
 SWITCH_DEFINITIONS_DH = [
     (SVC_DH_NANOE, STATUS[SVC_DH_NANOE], LABEL_NANOEX, ICON_NANOE, False, False),
-    (SVC_DH_BUZZER, STATUS[SVC_DH_BUZZER], LABEL_BUZZER, ICON_BUZZER, True, False),
+    (SVC_DH_BUZZER, STATUS[SVC_DH_BUZZER], LABEL_DH_BUZZER, ICON_BUZZER, True, False),
 ]
 SELECT_DEFINITIONS_DH = [
     (SVC_DH_FAN, STATUS[SVC_DH_FAN], LABEL_DH_FAN, ICON_FAN, DEHUMIDIFIER_AVAILABLE_FAN),

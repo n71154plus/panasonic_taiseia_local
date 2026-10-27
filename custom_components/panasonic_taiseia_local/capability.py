@@ -48,8 +48,13 @@ def filter_option_map(
     option_map: dict[int, str],
 ) -> dict[int, str]:
     """Filter a value→label map by device capability; keep full map if unknown."""
-    info = client.device.services.get(service)
+    services = client.device.services
+    info = services.get(service) if services else None
     if not info:
+        # Before the service list is probed, do not advertise every catalog
+        # mode. NXW/LXW briefly showed 智慧節能 / 送風 that the module rejects.
+        if not services:
+            return {}
         return dict(option_map)
     values = supported_values(info, list(option_map.keys()))
     if not values:

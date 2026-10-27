@@ -9,6 +9,16 @@ Home Assistant custom integration for **Panasonic TaiSEIA** appliances — **LAN
 
 ## Changelog
 
+### v1.7.6
+
+- **Timer ceilings (#7 / #12):** service-list bytes form one big-endian maximum. An AC off-timer of `0x05 0xA0` is 1440 minutes, not a 5–160 range.
+- **AC energy (#13):** `0x27` is outdoor-unit watts copied onto every indoor head. Integration now bills those watts only while that indoor unit is on, matching the official app `UserGetInfo` Power screen (unused study/kitchen heads stay at 0 kWh).
+- **Dehumidifier modes (#6 / #14):** service `0x01` bytes are a 16-bit support mask, not a numeric range, so the picker no longer lists 「模式 30」–「模式 89」. On NXW/LXW, local code `3` is 送風 and `9` is 節能; catalog codes without a set bit (智慧節能 `1`, CommandList 送風 `7`) stay hidden. Until the service list is probed, the full CommandList is not shown, so a restart no longer briefly offers modes the module rejects.
+- **Remote beep:** dehumidifier `0x18` is labeled 「遠端控制提示音」 (0 = sound, 1 = mute) and only covers remote/LAN writes; panel keys still beep.
+- **AC power entities (#16):** operating power is a watt sensor; current/energy registers are no longer misclassified as switches when the span is 0.
+- **Dehumidifier air quality (#15):** PM2.5, PM1.0, PM Level, and odor are probed even when omitted from the advertised 0x07 service list.
+- **Cloud monthly energy (#17):** appliances without LAN power telemetry read the official app Power report (`UserGetInfo`) for the current-month kWh total.
+
 ### v1.7.5
 
 - **Cloud appliance powered off:** EMS `503:DeviceJPInfo` (the module drops offline when the panel is off, or the appliance is unplugged) no longer fails setup. The entry loads, entities stay unavailable, and the next poll recovers them.

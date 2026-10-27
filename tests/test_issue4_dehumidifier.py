@@ -131,14 +131,13 @@ class Issue4DehumidifierCatalogTest(unittest.TestCase):
             device=SimpleNamespace(services={0x01: ServiceInfo(0x01, True, 0x1E, 0x59)})
         )
         filtered = filter_option_map(client, 0x01, base)
-        self.assertEqual(
-            sorted(filtered),
-            [0, 3, 4, 6],
-        )
+        # 0x1E59 → bits 0,3,4,6,9–12. Named modes only: 連續/送風/衣物乾燥/濕度/節能.
+        self.assertEqual(sorted(filtered), [0, 3, 4, 6, 9])
         self.assertEqual(filtered[0], "連續除濕")
-        self.assertEqual(filtered[3], "乾衣")
+        self.assertEqual(filtered[3], "送風")
         self.assertEqual(filtered[4], "衣物乾燥")
         self.assertEqual(filtered[6], "濕度設定")
+        self.assertEqual(filtered[9], "節能")
         self.assertNotIn(1, filtered)
         self.assertNotIn(7, filtered)
         self.assertNotIn(30, filtered)
@@ -155,10 +154,19 @@ class Issue4DehumidifierCatalogTest(unittest.TestCase):
         filtered = filter_option_map(client, 0x01, base)
         self.assertIn(0, filtered)
         self.assertIn(2, filtered)
+        self.assertEqual(filtered[3], "送風")
         self.assertIn(5, filtered)
+        self.assertEqual(filtered[9], "節能")
         self.assertNotIn(1, filtered)
         self.assertNotIn(7, filtered)
         self.assertNotIn(30, filtered)
+
+    def test_unprobed_services_hide_catalog_modes(self) -> None:
+        profile = build_profile("LXW")
+        base = dehumidifier_mode_map(profile)
+        assert base is not None
+        client = SimpleNamespace(device=SimpleNamespace(services={}))
+        self.assertEqual(filter_option_map(client, 0x01, base), {})
 
     def test_capability_exposes_extra_bits(self) -> None:
         profile = build_profile("NXW")

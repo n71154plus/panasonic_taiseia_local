@@ -492,8 +492,9 @@ class CloudAccount:
                 _USER_INFO,
                 headers={"CPToken": self.cp_token, "cptoken": self.cp_token},
                 json_body={
+                    # Official app posts today's date with unit=day / max_num=31.
                     "name": "Power",
-                    "from": datetime.today().replace(day=1).strftime("%Y/%m/%d"),
+                    "from": datetime.today().strftime("%Y/%m/%d"),
                     "unit": "day",
                     "max_num": days,
                 },

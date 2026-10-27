@@ -426,11 +426,23 @@ def _known_service_kind(
 
 
 def classify_command(cmd: CommandDef, device_type: int) -> ClassifiedCommand:
+    from .const import LABEL_DH_BUZZER, SVC_DH_BUZZER, TYPE_DEHUMIDIFIER
+
     owned = set()
     if device_type == 1:
         owned = _OWNED_BY_CLIMATE
     elif device_type == 4:
         owned = _OWNED_BY_HUMIDIFIER
+
+    # Dehumidifier 0x18 only beeps on remote/LAN writes; rename for clarity.
+    if device_type == TYPE_DEHUMIDIFIER and cmd.service == SVC_DH_BUZZER:
+        cmd = CommandDef(
+            cmd.service,
+            LABEL_DH_BUZZER,
+            cmd.parameter_type,
+            cmd.parameters,
+            cmd.unit,
+        )
 
     if cmd.service in owned:
         return ClassifiedCommand(command=cmd, kind="owned", icon=_icon_for(cmd.name))
