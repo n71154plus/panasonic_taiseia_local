@@ -6,6 +6,7 @@ import asyncio
 import logging
 import re
 import socket
+import time
 from dataclasses import dataclass
 
 import aiohttp
@@ -98,6 +99,15 @@ async def _ssdp_search(timeout: float = 3.0) -> set[str]:
     except Exception as err:  # noqa: BLE001
         _LOGGER.debug("SSDP search failed: %s", err)
     return hosts
+
+
+async def async_port_open(
+    host: str, port: int = DEFAULT_PORT, timeout: float = 3.0
+) -> bool:
+    """True when TCP connects. One attempt, no SOAP and no retries."""
+    if not host or host in ("0.0.0.0", ""):
+        return False
+    return await _port_open(host, port, timeout)
 
 
 async def _port_open(host: str, port: int, timeout: float = 0.4) -> bool:
@@ -234,6 +244,56 @@ async def async_discover_devices(
     return results
 
 
+# Several entries reboot together. Share one SSDP /24 pass so three powered-off
+# dehumidifiers do not each probe every other live module.
+_HOST_SCAN_TTL_S = 300.0
+_host_scan_lock: asyncio.Lock | None = None
+# (monotonic, included a subnet scan, hints, devices)
+_host_scan_cache: tuple[float, bool, tuple[str, ...], list[DiscoveredDevice]] | None = (
+    None
+)
+
+
+def clear_host_scan_cache() -> None:
+    """Drop the shared MAC-scan cache (tests)."""
+    global _host_scan_cache
+    _host_scan_cache = None
+
+
+def _host_scan_lock_get() -> asyncio.Lock:
+    global _host_scan_lock
+    if _host_scan_lock is None:
+        _host_scan_lock = asyncio.Lock()
+    return _host_scan_lock
+
+
+async def _scan_hosts_shared(
+    session: aiohttp.ClientSession,
+    *,
+    include_subnet_scan: bool,
+    subnet_hints: list[str] | None,
+) -> list[DiscoveredDevice]:
+    """Return discovered modules, reusing a fresh scan when one is in hand."""
+    global _host_scan_cache
+    hints = tuple(subnet_hints or ())
+    now = time.monotonic()
+    cached = _host_scan_cache
+    if (
+        cached is not None
+        and now - cached[0] < _HOST_SCAN_TTL_S
+        and cached[2] == hints
+        and (cached[1] or not include_subnet_scan)
+    ):
+        return list(cached[3])
+    devices = await async_discover_devices(
+        session,
+        include_subnet_scan=include_subnet_scan,
+        subnet_hints=subnet_hints,
+    )
+    _host_scan_cache = (time.monotonic(), include_subnet_scan, hints, list(devices))
+    return list(devices)
+
+
 async def async_find_host_by_mac(
     session: aiohttp.ClientSession,
     mac: str,
@@ -243,24 +303,24 @@ async def async_find_host_by_mac(
 ) -> DiscoveredDevice | None:
     """Re-locate a module after DHCP gave it a new IP (match by MAC).
 
-    SSDP-only first; full /24 scan only if still missing.
+    SSDP-only first; full /24 scan only if still missing. Concurrent lookups
+    share one scan for ``_HOST_SCAN_TTL_S`` seconds.
     """
     want = _normalize_mac(mac)
     if not want:
         return None
-    found = await async_discover_devices(
-        session,
-        include_subnet_scan=False,
-        subnet_hints=subnet_hints,
-    )
-    hit = _match_mac(found, want)
-    if hit is not None:
-        return hit
-    if not include_subnet_scan:
-        return None
-    found = await async_discover_devices(
-        session,
-        include_subnet_scan=True,
-        subnet_hints=subnet_hints,
-    )
-    return _match_mac(found, want)
+    async with _host_scan_lock_get():
+        found = await _scan_hosts_shared(
+            session,
+            include_subnet_scan=False,
+            subnet_hints=subnet_hints,
+        )
+        hit = _match_mac(found, want)
+        if hit is not None or not include_subnet_scan:
+            return hit
+        found = await _scan_hosts_shared(
+            session,
+            include_subnet_scan=True,
+            subnet_hints=subnet_hints,
+        )
+        return _match_mac(found, want)

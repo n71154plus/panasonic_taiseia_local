@@ -3,12 +3,24 @@
 Home Assistant 自訂整合：控制配備 **TaiSEIA** 的 Panasonic 家電，支援**區網 LAN**與台灣 **EMS 雲端**，並可**每機選擇**控制路徑。
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Release](https://img.shields.io/github/v/release/n71154plus/panasonic_taiseia_local?label=v1.7.6)](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.6)
+[![Release](https://img.shields.io/github/v/release/n71154plus/panasonic_taiseia_local?label=v1.7.7)](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.7)
 [![Validate](https://github.com/n71154plus/panasonic_taiseia_local/actions/workflows/validate.yml/badge.svg)](https://github.com/n71154plus/panasonic_taiseia_local/actions/workflows/validate.yml)
 
 > **English:** [README.md](README.md)
 
-## 最新版本 v1.7.6 變更摘要
+## 最新版本 v1.7.7 變更摘要
+
+- **斷電時重開 Home Assistant（#6）：** 智慧插座切斷模組電源時，啟動只做一次 3 秒的 TCP 57223 檢查，不再對關掉的位址送 SOAP，也不會逐一讀幾十個服務。設定會完成，實體維持不可用，不會再把整次回合拖到 300 秒後變成 `setup_error`。插座恢復供電後，下一輪輪詢發現埠開了就自動重新載入並完整 probe。機器本來就開著時，仍是連上後照舊 probe。混合／僅雲端在區網不通時繼續走雲端。ALL_STATES 被拒絕但埠還開著時，仍會改逐項讀取。
+
+完整說明見 [Release v1.7.7](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.7)。
+
+## 更新紀錄
+
+### v1.7.7
+
+- 見上方「最新版本 v1.7.7 變更摘要」。
+
+### v1.7.6
 
 - **定時上限（#7 / #12）：** 服務清單兩個位元組解成一個 big-endian 上限。冷氣關機定時 `0x05 0xA0` 是 1440 分鐘，不再被拆成 5～160。
 - **冷氣耗電（#13）：** `0x27` 是室外機功率，一對多會複製到每台室內機。室內機電源關閉時不再累加，對齊官方 App `UserGetInfo`（未開的書房／廚房本月為 0）。
@@ -17,14 +29,6 @@ Home Assistant 自訂整合：控制配備 **TaiSEIA** 的 Panasonic 家電，�
 - **冷氣功率實體（#16）：** 即時功率正確標成瓦特感測器；電流／累計耗電不再被 span=0 誤判成開關。
 - **除濕機空品（#15）：** 即使服務清單（0x07）沒列齊，仍會探測並顯示 PM2.5、PM1.0、PM Level、異味。
 - **雲端本月耗電（#17）：** 沒有區網功率服務的機種改讀官方 App 的 Power 回報（`UserGetInfo`），提供本月度數。
-
-完整說明見 [Release v1.7.6](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.6)。
-
-## 更新紀錄
-
-### v1.7.6
-
-- 見上方「最新版本 v1.7.6 變更摘要」。
 
 ### v1.7.5
 
