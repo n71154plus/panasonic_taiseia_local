@@ -10,7 +10,6 @@ import time
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_NAME
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -43,7 +42,9 @@ from .const import (
     CONF_UPDATE_INTERVAL,
     CONF_USERNAME,
     CONTROL_MODE_CLOUD,
+    CONTROL_MODE_LOCAL,
     DATA_CLIENT,
+    LAN_REACH_TIMEOUT,
     DATA_CONTROL,
     DATA_COORDINATOR,
     DATA_ENERGY,
@@ -66,7 +67,7 @@ from .control import (
     entry_has_cloud_creds,
     resolve_control_mode,
 )
-from .discovery import async_find_host_by_mac, async_probe_host
+from .discovery import async_find_host_by_mac, async_port_open, async_probe_host
 from .energy import (
     async_get_energy_settings,
     async_load_tracker,
@@ -90,13 +91,21 @@ from .naming import (
     format_local_title,
     looks_like_module_model,
 )
-from .taiseia import ServiceInfo, TaiSeiaClient, configure_lan_concurrency
+from .taiseia import (
+    ServiceInfo,
+    TaiSeiaClient,
+    configure_lan_concurrency,
+    is_lan_transport_error,
+)
 
 _LOGGER = logging.getLogger(__package__)
 
 HUB_PLATFORMS = ["sensor"]
 # Avoid flooding the LAN with full /24 scans on every failed poll.
 _HOST_REDISCOVER_COOLDOWN_S = 300.0
+# After the socket comes back, reload once so the service list and hidden
+# entities match a normal boot. A failed reload may try again after this gap.
+_LAN_RELOAD_GAP_S = 60.0
 
 
 def _is_hub(entry: ConfigEntry) -> bool:
@@ -347,15 +356,35 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 gwid or "?",
             )
 
+    # Set when this boot actually ran SOAP probe. A later poll that finds the
+    # socket open reloads once so entities match that probed setup.
+    probed_at_setup = False
+    did_setup_rediscover = False
     if not intentionally_cloud:
         stagger = _setup_stagger_seconds(host)
         if stagger:
             await asyncio.sleep(stagger)
 
-        try:
-            await client.async_probe()
-            lan_ok = True
-        except Exception as err:
+        # A powered-off module (smart plug) never accepts TCP. SOAP retries of
+        # 12s×3, then a per-service walk, run until Home Assistant cancels
+        # setup at 300s and leaves the entry in setup_error.
+        probe_err: Exception | None = None
+        port_open = await async_port_open(host, client.port, timeout=LAN_REACH_TIMEOUT)
+        if port_open:
+            try:
+                await client.async_probe()
+                lan_ok = True
+                probed_at_setup = True
+            except Exception as err:  # noqa: BLE001
+                probe_err = err
+        else:
+            probe_err = TimeoutError(
+                f"TCP {client.port} closed on {host}"
+            )
+        if not lan_ok:
+            # DHCP may have moved a module that is actually on. The scan does
+            # not SOAP the closed address. Concurrent entries share one scan.
+            did_setup_rediscover = True
             rebound = await _async_rebinding_host(
                 hass, entry, client, reason="setup unreachable"
             )
@@ -363,30 +392,43 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 try:
                     await client.async_probe()
                     lan_ok = True
+                    probed_at_setup = True
                     host = rebound
-                except Exception as err2:
-                    err = err2
-            if not lan_ok:
-                if entry_has_cloud_creds(entry) or entry.data.get(CONF_CLOUD_GWID):
-                    # Temporary LAN outage: keep hybrid/local options; allow later
-                    # recovery. Do NOT flip cloud_only or lock CONTROL_MODE_CLOUD.
-                    _LOGGER.warning(
-                        "TaiSEIA %s LAN unreachable (%s); using cloud until LAN recovers",
-                        host,
-                        err,
-                    )
-                    _apply_entry_sa_type()
-                    client.device.host = host
-                    mac = _entry_mac(entry)
-                    if mac:
-                        client.device.mac = mac
-                    gwid = (entry.data.get(CONF_CLOUD_GWID) or "").strip()
-                    if gwid and not client.device.mac:
-                        client.device.udn = f"gwid:{gwid.lower()}"
-                else:
-                    raise ConfigEntryNotReady(
-                        f"Cannot reach TaiSEIA device at {host}: {err}"
-                    ) from err
+                    probe_err = None
+                except Exception as err2:  # noqa: BLE001
+                    probe_err = err2
+        if not lan_ok:
+            # Finish setup from the stored type. Entities come up unavailable
+            # and the next poll recovers them. Do not raise ConfigEntryNotReady:
+            # that removes the entities, and a cancelled 300s setup becomes
+            # setup_error which never retries.
+            _apply_entry_sa_type()
+            client.device.host = host
+            mac = _entry_mac(entry)
+            if mac:
+                client.device.mac = mac
+            gwid = (entry.data.get(CONF_CLOUD_GWID) or "").strip()
+            if gwid and not client.device.mac:
+                client.device.udn = f"gwid:{gwid.lower()}"
+            mode_now = resolve_control_mode(entry)
+            has_cloud = entry_has_cloud_creds(entry) or bool(
+                entry.data.get(CONF_CLOUD_GWID)
+            )
+            if mode_now == CONTROL_MODE_LOCAL or not has_cloud:
+                _LOGGER.info(
+                    "TaiSEIA %s is offline (%s); entities stay unavailable "
+                    "until the module accepts TCP %s",
+                    host,
+                    probe_err,
+                    client.port,
+                )
+            else:
+                # Hybrid / cloud keep working. Do not lock control_mode.
+                _LOGGER.warning(
+                    "TaiSEIA %s LAN unreachable (%s); using cloud until LAN recovers",
+                    host,
+                    probe_err,
+                )
         # Probe left type unknown → prefer stored entry/cloud type.
         if lan_ok and not client.device.sa_type_id:
             _apply_entry_sa_type()
@@ -575,7 +617,12 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         SVC_OPERATING_POWER in client.device.services
     )
     entry_id = entry.entry_id
-    last_rediscover_mono = 0.0
+    # A scan already ran during setup; don't repeat it on the first poll.
+    last_rediscover_mono = time.monotonic() if did_setup_rediscover else 0.0
+    last_reload_mono = 0.0
+    # False until platforms are about to load, so the first refresh cannot
+    # reload an entry that is still setting up.
+    entry_ready = False
     # Cloud Power report (UserGetInfo name=Power): official-app monthly kWh for
     # appliances without LAN power telemetry. Refreshed at most hourly.
     power_report: list = [0.0, None]  # [mono_ts, kwh|None]
@@ -592,18 +639,112 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         sa_type_id=client.device.sa_type_id,
     )
 
+    def _uses_cloud_when_lan_down() -> bool:
+        if cloud_only:
+            return True
+        if control.mode == CONTROL_MODE_LOCAL:
+            return False
+        return control.can_use_cloud()
+
+    def _schedule_probe_reload() -> None:
+        """Reload so a full probe rebuilds services and hidden entities."""
+        nonlocal last_reload_mono
+        if probed_at_setup or not entry_ready:
+            return
+        now = time.monotonic()
+        if now - last_reload_mono < _LAN_RELOAD_GAP_S:
+            return
+        last_reload_mono = now
+        _LOGGER.info(
+            "TaiSEIA %s accepts TCP %s again; reloading to probe",
+            client.host,
+            client.port,
+        )
+        hass.async_create_task(hass.config_entries.async_reload(entry_id))
+
+    async def _rediscover_if_due(reason: str) -> str | None:
+        nonlocal last_rediscover_mono
+        now = time.monotonic()
+        if now - last_rediscover_mono < _HOST_REDISCOVER_COOLDOWN_S:
+            return None
+        last_rediscover_mono = now
+        live_entry = hass.config_entries.async_get_entry(entry_id) or entry
+        return await _async_rebinding_host(
+            hass, live_entry, client, reason=reason
+        )
+
     async def async_update_data():
         nonlocal last_rediscover_mono, lan_ok
         live = hass.config_entries.async_get_entry(entry_id)
         current_host = client.host
         path = "unknown"
+        status: dict = {}
         try:
-            status, path = await control.async_fetch_status(cloud_types)
+            # This boot never probed. A closed socket must not start SOAP:
+            # local mode used to walk every service at 12s×3 and hit the
+            # 300s startup cancel. Hybrid/cloud skip LAN and keep using EMS.
+            if (
+                not lan_ok
+                and not cloud_only
+                and client.host not in ("", "0.0.0.0")
+            ):
+                open_now = await async_port_open(
+                    client.host, client.port, timeout=LAN_REACH_TIMEOUT
+                )
+                if not open_now:
+                    rebound = await _rediscover_if_due("poll port closed")
+                    if rebound:
+                        current_host = rebound
+                        open_now = True
+                if open_now and probed_at_setup:
+                    # Services are already known. Read again; do not reload.
+                    lan_ok = True
+                    control.lan_ok = True
+                    status, path = await control.async_fetch_status(cloud_types)
+                elif open_now:
+                    # First contact since an offline boot. Reload runs probe
+                    # and rebuilds entities. This cycle stays unavailable
+                    # (local) or on the cloud (hybrid) so SOAP is not walked.
+                    _schedule_probe_reload()
+                    if _uses_cloud_when_lan_down():
+                        status, path = await control.async_fetch_status(cloud_types)
+                    else:
+                        status, path = {}, "offline"
+                elif not _uses_cloud_when_lan_down():
+                    status, path = {}, "offline"
+                else:
+                    status, path = await control.async_fetch_status(cloud_types)
+            else:
+                status, path = await control.async_fetch_status(cloud_types)
             if path == "lan":
                 lan_ok = True
                 control.lan_ok = True
         except Exception as err:
-            if control.mode != CONTROL_MODE_CLOUD and not cloud_only:
+            if is_lan_transport_error(err):
+                # Host stopped answering. Drop stale "on" state. One slow
+                # ALL_STATES already ran; further polls take the port check.
+                lan_ok = False
+                control.lan_ok = False
+                rebound = await _rediscover_if_due("poll unreachable")
+                if rebound:
+                    current_host = rebound
+                    _schedule_probe_reload()
+                if _uses_cloud_when_lan_down():
+                    try:
+                        status, path = await control.async_fetch_status(cloud_types)
+                    except Exception as err_cloud:
+                        raise UpdateFailed(
+                            f"TaiSEIA update failed for {current_host}: "
+                            f"{type(err_cloud).__name__}: {err_cloud}"
+                        ) from err_cloud
+                else:
+                    _LOGGER.info(
+                        "TaiSEIA %s LAN dropped (%s); marking unavailable",
+                        current_host,
+                        err,
+                    )
+                    status, path = {}, "offline"
+            elif control.mode != CONTROL_MODE_CLOUD and not cloud_only:
                 now = time.monotonic()
                 if now - last_rediscover_mono >= _HOST_REDISCOVER_COOLDOWN_S:
                     last_rediscover_mono = now
@@ -657,7 +798,13 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # Cached settings (refreshed on options reload / hub save)
             settings = await async_get_energy_settings(hass)
             energy_tracker.apply_settings(settings)
-            if has_power and energy_enabled:
+            if path == "offline" and has_power and energy_enabled:
+                # Unplugged. Record 0 W so the last sample is not integrated
+                # across the whole outage when the module returns.
+                power_w = 0.0
+                energy_tracker.update(power_w)
+                await async_save_tracker(hass, entry_id, energy_tracker)
+            elif has_power and energy_enabled:
                 raw = status.get(STATUS_OPERATING_POWER)
                 if raw is not None and raw != "":
                     try:
@@ -775,6 +922,7 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    entry_ready = True
     seed_options_snapshot(hass, entry)
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
     return True

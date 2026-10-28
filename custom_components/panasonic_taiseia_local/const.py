@@ -22,6 +22,9 @@ CONF_REFRESH_TOKEN = "refresh_token"
 # CZ-T006 modules choke when many LAN clients hit SetSaanet at once (HA boot /
 # aligned coordinator ticks). Defaults; overridable via shared LAN settings.
 DEFAULT_REQUEST_TIMEOUT = 12.0
+# One TCP connect during setup / offline polls. A live module accepts in
+# milliseconds; a powered-off host fails here instead of SOAP 12s×3×N.
+LAN_REACH_TIMEOUT = 3.0
 DEFAULT_MAX_CONCURRENT = 2
 DEFAULT_REQUEST_RETRIES = 3
 DEFAULT_REQUEST_RETRY_DELAY = 0.6
