@@ -61,6 +61,7 @@ from .const import (
     CONF_ENERGY_RESET_WEEKDAY,
     CONF_ENTRY_TYPE,
     CONF_HUB_ENTRY_ID,
+    CONF_LAN_MOLD_DRY,
     CONF_INDOOR_MODEL,
     CONF_MAX_CONCURRENT,
     CONF_MODEL_TYPE,
@@ -1017,6 +1018,13 @@ class DeviceOptionsFlowHandler(config_entries.OptionsFlow):
                     default=opts.get(CONF_CONTROL_MODE, DEFAULT_CONTROL_MODE),
                 )
             ] = vol.In(CONTROL_MODE_OPTIONS)
+            if sa_type == TYPE_AC:
+                schema[
+                    vol.Optional(
+                        CONF_LAN_MOLD_DRY,
+                        default=bool(opts.get(CONF_LAN_MOLD_DRY, False)),
+                    )
+                ] = bool
         if not has_hub:
             schema.update(
                 {
@@ -1129,6 +1137,10 @@ class DeviceOptionsFlowHandler(config_entries.OptionsFlow):
                     if mode not in CONTROL_MODE_OPTIONS:
                         mode = DEFAULT_CONTROL_MODE
                     new_options[CONF_CONTROL_MODE] = mode
+                if sa_type == TYPE_AC and CONF_LAN_MOLD_DRY in user_input:
+                    new_options[CONF_LAN_MOLD_DRY] = bool(
+                        user_input.get(CONF_LAN_MOLD_DRY)
+                    )
                 for k in (
                     "mold_dry_simulate",
                     "mold_dry_minutes",

@@ -22,19 +22,27 @@ from .const import (
     CONF_CLOUD_GWID,
     CONF_CONTROL_MODE,
     CONF_CP_TOKEN,
+    CONF_DEVICE_TYPE,
     CONF_ENTRY_TYPE,
     CONF_HUB_ENTRY_ID,
+    CONF_LAN_MOLD_DRY,
     CONF_PASSWORD,
     CONF_REFRESH_TOKEN,
     CONF_USERNAME,
     CONTROL_MODE_CLOUD,
     CONTROL_MODE_HYBRID,
     CONTROL_MODE_LOCAL,
+    DATA_COORDINATOR,
     DATA_EMS_GATE,
     DEFAULT_CONTROL_MODE,
     DOMAIN,
     ENTITY_SERVICES_BY_TYPE,
     ENTRY_TYPE_HUB,
+    STATUS,
+    SVC_MOLD,
+    SVC_POWER,
+    SVC_POWER_LAN_MOLD_DRY,
+    TYPE_AC,
 )
 from .ems_transport import EmsGate, EmsSettings, RequestPriority
 from .entry_helpers import async_update_entry_data
@@ -196,6 +204,35 @@ class DeviceControl:
     def can_use_lan(self) -> bool:
         return self.lan_ok and not self.cloud_only and bool(self.client.host)
 
+    def _lan_value(self, service: int, value: int) -> int:
+        """Map a logical write to the LAN register value.
+
+        AC power-off uses the firmware's undocumented stop code 2
+        ("power off + mold-prevention drying") when the integration option
+        is on and the appliance's drying switch (0x17) is on — mirroring
+        what the cloud does with plain 0. Plain 0 over LAN stops without
+        drying (upstream issue #3).
+        """
+        if (
+            service == SVC_POWER
+            and value == 0
+            and self._live_entry().data.get(CONF_DEVICE_TYPE) == TYPE_AC
+            and self._live_entry().options.get(CONF_LAN_MOLD_DRY, False)
+            and self._mold_flag_on()
+        ):
+            return SVC_POWER_LAN_MOLD_DRY
+        return value
+
+    def _mold_flag_on(self) -> bool:
+        slot = (self.hass.data.get(DOMAIN) or {}).get(self.entry_id) or {}
+        coord = slot.get(DATA_COORDINATOR)
+        data = (getattr(coord, "data", None) or {}) if coord else {}
+        raw = data.get(STATUS[SVC_MOLD])
+        try:
+            return bool(int(raw)) if raw is not None else True
+        except (TypeError, ValueError):
+            return True
+
     def can_use_cloud(self) -> bool:
         live = self._live_entry()
         return entry_has_cloud_creds(live) or bool(live.data.get(CONF_CLOUD_GWID))
@@ -319,7 +356,9 @@ class DeviceControl:
         errors: list[str] = []
 
         async def _lan() -> None:
-            await self.client.async_write_device(service, value)
+            await self.client.async_write_device(
+                service, self._lan_value(service, value)
+            )
 
         if mode == CONTROL_MODE_LOCAL:
             if not self.can_use_lan():

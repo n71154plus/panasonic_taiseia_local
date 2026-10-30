@@ -92,7 +92,8 @@
           "energy_reset_weekday": "每週星期幾歸零（僅每週週期）",
           "energy_reset_period": "立即重置本期耗電",
           "energy_reset_total": "立即重置累計耗電",
-          "control_mode": "控制路徑（混合＝寫雲端優先／讀本地優先）"
+          "control_mode": "控制路徑（混合＝寫雲端優先／讀本地優先）",
+          "lan_mold_dry": "LAN 關機時執行乾燥防霉（冷氣；改送停機碼 2 而非 0）"
         }
       }
     }
