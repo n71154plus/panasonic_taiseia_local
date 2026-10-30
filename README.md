@@ -101,7 +101,7 @@ You can keep the official app and other HA cloud integrations. Prefer **not** ha
 
 | Class | DeviceType | Supported? | Notes |
 | --- | --- | --- | --- |
-| **Air conditioner** | `1` | **Yes** | Prefer **hybrid** so cloud OFF can trigger official 乾燥防霉 |
+| **Air conditioner** | `1` | **Yes** | Prefer **hybrid** so cloud OFF can trigger official 乾燥防霉; with **LAN 關機執行乾燥防霉** enabled in device options, local/hybrid LAN fallback sends stop code `2` and dries too |
 | **Refrigerator** | `2` | **Yes** (typical cloud-only) | `climate` N/A → CommandList entities; import as **(雲端)** when no `57223` |
 | **Washer** | `3` | **Yes** | No dedicated washer platform → switches/selects/sensors from CommandList |
 | **Dehumidifier** | `4` | **Yes** | Same as AC when LAN is open |
@@ -135,6 +135,9 @@ Override ModelType in device options.
 
 - **climate** / **humidifier** for AC / dehumidifier; other classes use CommandList sensors / switches / selects / numbers / buttons
 - Control modes: **hybrid** / **local** / **cloud**
+- AC option **LAN 關機執行乾燥防霉**: power-off over LAN sends the firmware's
+  undocumented stop code `2` (power off + mold-prevention drying) instead of
+  plain `0`, which stops without drying
 - SSDP + LAN `57223` discovery; EMS import (LAN + cloud-only)
 - Optional energy sensors (period / total / house)
 

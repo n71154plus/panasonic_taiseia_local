@@ -85,6 +85,10 @@ CONTROL_MODE_OPTIONS = {
     CONTROL_MODE_CLOUD: "僅雲端",
 }
 
+# AC only: power off over LAN with the undocumented "power off + mold-dry"
+# stop code instead of plain 0 (see SVC_POWER_LAN_MOLD_DRY).
+CONF_LAN_MOLD_DRY = "lan_mold_dry"
+
 # Cloud metadata cached on device entries (from EMS)
 CONF_CLOUD_NICKNAME = "cloud_nickname"
 CONF_CLOUD_MODEL = "cloud_model"
@@ -191,6 +195,11 @@ REG_ALL_STATES = 0x08
 
 # ---- Shared / AC services ----
 SVC_POWER = 0x00
+# AC firmware accepts power=2 over LAN: stop and run the mold-prevention
+# drying cycle (same behaviour as a cloud power-off). CommandList documents
+# only 0=停止/1=運轉; 2 was verified on CS-RX50JA2 (PXGD) against the cloud
+# path. Plain 0 over LAN stops without drying (upstream issue #3).
+SVC_POWER_LAN_MOLD_DRY = 2
 SVC_MODE = 0x01
 SVC_FAN = 0x02
 SVC_TEMP_SET = 0x03

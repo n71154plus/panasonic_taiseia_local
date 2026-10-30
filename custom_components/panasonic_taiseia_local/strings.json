@@ -92,7 +92,8 @@
           "energy_reset_weekday": "Weekday to reset (weekly only)",
           "energy_reset_period": "Reset period energy now",
           "energy_reset_total": "Reset total energy now",
-          "control_mode": "Control path (hybrid = cloud-first write / LAN-first read)"
+          "control_mode": "Control path (hybrid = cloud-first write / LAN-first read)",
+          "lan_mold_dry": "LAN power-off runs the mold-prevention drying cycle (AC; sends stop code 2 instead of 0)"
         }
       }
     }
