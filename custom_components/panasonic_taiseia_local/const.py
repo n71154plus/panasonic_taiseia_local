@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from homeassistant.components.climate import HVACMode
 
+# Match homeassistant.components.climate PRESET_* string values.
+CLIMATE_PRESET_NONE = "none"
+CLIMATE_PRESET_COMFORT = "comfort"
+
 DOMAIN = "panasonic_taiseia_local"
 MANUFACTURER = "Panasonic"
 DEFAULT_NAME = "Panasonic TaiSEIA Local"
@@ -266,6 +270,30 @@ CLIMATE_AVAILABLE_MODE = [
     {"key": HVACMode.AUTO, "mappingCode": 3},
     {"key": HVACMode.HEAT, "mappingCode": 4},
 ]
+
+# Extended 0x01 codes that are not HA HVACMode values (issue #19).
+# Verified on CS-VX22BA2 (ModelType VX): 5 = 舒適冷房. Display as cool +
+# climate preset; do not add a custom HVACMode.
+AC_MODE_COMFORT_COOL = 5
+AC_MODE_LABELS = {
+    0: "冷氣",
+    1: "除濕",
+    2: "清淨",
+    3: "自動",
+    4: "暖氣",
+    AC_MODE_COMFORT_COOL: "舒適冷房",
+}
+# Raw mode → which HVACMode to report while powered on.
+AC_EXTENDED_HVAC_ALIAS = {
+    AC_MODE_COMFORT_COOL: HVACMode.COOL,
+}
+# Raw mode ↔ climate preset_mode (HA PRESET_COMFORT = "comfort").
+AC_CODE_TO_PRESET = {
+    AC_MODE_COMFORT_COOL: CLIMATE_PRESET_COMFORT,
+}
+AC_PRESET_TO_CODE = {
+    CLIMATE_PRESET_COMFORT: AC_MODE_COMFORT_COOL,
+}
 CLIMATE_AVAILABLE_FAN_MODE = {
     0: "自動", 1: "20%", 2: "40%", 3: "60%", 4: "80%", 5: "100%",
 }

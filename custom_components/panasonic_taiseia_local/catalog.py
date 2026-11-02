@@ -124,6 +124,10 @@ _HVAC_NAME_MAP = {
     "暖氣": HVACMode.HEAT,
     "制熱": HVACMode.HEAT,
 }
+# Manufacturer modes that are climate presets, not HVACMode (issue #19).
+_PRESET_NAME_CODES = {
+    "舒適冷房": 5,
+}
 
 _ICON_RULES = (
     ("nanoe", "mdi:atom"),
@@ -715,11 +719,27 @@ def climate_hvac_mappings(profile: DeviceProfile | None) -> list[dict]:
         return []
     mappings = []
     for value, label in parse_enum_params(cmd.parameters).items():
+        if label in _PRESET_NAME_CODES:
+            continue
         mode = _HVAC_NAME_MAP.get(label)
         if mode is None:
             continue
         mappings.append({"key": mode, "mappingCode": value, "label": label})
     return mappings
+
+
+def climate_preset_codes(profile: DeviceProfile | None) -> dict[int, str]:
+    """Return CommandList 0x01 codes that are climate presets (not HVACMode)."""
+    out: dict[int, str] = {}
+    if not profile:
+        return out
+    cmd = get_command(profile, 0x01)
+    if not cmd or cmd.parameter_type != "enum":
+        return out
+    for value, label in parse_enum_params(cmd.parameters).items():
+        if label in _PRESET_NAME_CODES:
+            out[int(value)] = label
+    return out
 
 
 def climate_fan_map(profile: DeviceProfile | None) -> dict[int, str] | None:

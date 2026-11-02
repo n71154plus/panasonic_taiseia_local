@@ -38,7 +38,12 @@ def _stub_homeassistant() -> None:
     climate.HVACMode = _HVACMode
     climate.ClimateEntity = object
     climate.ClimateEntityFeature = types.SimpleNamespace(
-        TURN_ON=1, TURN_OFF=2, TARGET_TEMPERATURE=16, FAN_MODE=8, SWING_MODE=32
+        TURN_ON=1,
+        TURN_OFF=2,
+        TARGET_TEMPERATURE=16,
+        FAN_MODE=8,
+        SWING_MODE=32,
+        PRESET_MODE=4,
     )
     ha.components = components
     components.climate = climate

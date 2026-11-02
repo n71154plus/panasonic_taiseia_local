@@ -3,22 +3,26 @@
 Home Assistant 自訂整合：控制配備 **TaiSEIA** 的 Panasonic 家電，支援**區網 LAN**與台灣 **EMS 雲端**，並可**每機選擇**控制路徑。
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Release](https://img.shields.io/github/v/release/n71154plus/panasonic_taiseia_local?label=v1.7.7)](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.7)
+[![Release](https://img.shields.io/github/v/release/n71154plus/panasonic_taiseia_local?label=v1.7.8)](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.8)
 [![Validate](https://github.com/n71154plus/panasonic_taiseia_local/actions/workflows/validate.yml/badge.svg)](https://github.com/n71154plus/panasonic_taiseia_local/actions/workflows/validate.yml)
 
 > **English:** [README.md](README.md)
 
-## 最新版本 v1.7.7 變更摘要
+## 最新版本 v1.7.8 變更摘要
 
-- **斷電時重開 Home Assistant（#6）：** 智慧插座切斷模組電源時，啟動只做一次 3 秒的 TCP 57223 檢查，不再對關掉的位址送 SOAP，也不會逐一讀幾十個服務。設定會完成，實體維持不可用，不會再把整次回合拖到 300 秒後變成 `setup_error`。插座恢復供電後，下一輪輪詢發現埠開了就自動重新載入並完整 probe。機器本來就開著時，仍是連上後照舊 probe。混合／僅雲端在區網不通時繼續走雲端。ALL_STATES 被拒絕但埠還開著時，仍會改逐項讀取。
+- **舒適冷房（#19）：** CS-VX22BA2（VX）等機種以 `0x01=5` 表示舒適冷房。電源開著但模式碼不在標準 HVAC 表內時，不再誤顯示為關機。以 climate **preset**（`comfort`）選取／清除，不新增自訂 HVACMode；關機再開會保留 raw mode `5`。VX／UX CommandList 已補上標籤。
 
-完整說明見 [Release v1.7.7](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.7)。
+完整說明見 [Release v1.7.8](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.8)。
 
 ## 更新紀錄
 
+### v1.7.8
+
+- 見上方「最新版本 v1.7.8 變更摘要」。
+
 ### v1.7.7
 
-- 見上方「最新版本 v1.7.7 變更摘要」。
+- **斷電時重開 Home Assistant（#6）：** 智慧插座切斷模組電源時，啟動只做一次 3 秒的 TCP 57223 檢查，不再對關掉的位址送 SOAP，也不會逐一讀幾十個服務。設定會完成，實體維持不可用，不會再把整次回合拖到 300 秒後變成 `setup_error`。插座恢復供電後，下一輪輪詢發現埠開了就自動重新載入並完整 probe。機器本來就開著時，仍是連上後照舊 probe。混合／僅雲端在區網不通時繼續走雲端。ALL_STATES 被拒絕但埠還開著時，仍會改逐項讀取。
 
 ### v1.7.6
 

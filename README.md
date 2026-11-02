@@ -3,22 +3,26 @@
 Home Assistant custom integration for **Panasonic TaiSEIA** appliances — **LAN and/or Taiwan EMS cloud**, with a per-device control path you can choose.
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Release](https://img.shields.io/github/v/release/n71154plus/panasonic_taiseia_local?label=v1.7.7)](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.7)
+[![Release](https://img.shields.io/github/v/release/n71154plus/panasonic_taiseia_local?label=v1.7.8)](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.8)
 [![Validate](https://github.com/n71154plus/panasonic_taiseia_local/actions/workflows/validate.yml/badge.svg)](https://github.com/n71154plus/panasonic_taiseia_local/actions/workflows/validate.yml)
 
 > **Traditional Chinese:** [README.zh-Hant.md](README.zh-Hant.md)
 
-## What's new in v1.7.7
+## What's new in v1.7.8
 
-- **Restart while unpowered (#6):** if a smart plug has cut the module, setup does one 3-second TCP 57223 check and does not send SOAP to that address or walk dozens of services. The entry finishes loading, entities stay unavailable, and startup is no longer held until the 300-second cancel that left the entry in `setup_error`. When the socket accepts again, the next poll reloads and runs a full probe. A module that is already on still probes as before. Hybrid and cloud keep using EMS while LAN is down. If ALL_STATES is rejected but the port is open, per-service reads still run.
+- **Comfort cool (#19):** CS-VX22BA2 (VX) and similar units use `0x01=5` for 舒適冷房. While powered on with that (or another non-HVAC) mode code, climate no longer falsely reports OFF. Selection uses the climate **preset** `comfort` (not a custom HVACMode); turn-on resumes raw mode `5`. VX/UX CommandList labels updated.
 
-Full notes: [Release v1.7.7](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.7).
+Full notes: [Release v1.7.8](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.8).
 
 ## Changelog
 
+### v1.7.8
+
+- See **What's new in v1.7.8** above.
+
 ### v1.7.7
 
-- See **What's new in v1.7.7** above.
+- **Restart while unpowered (#6):** if a smart plug has cut the module, setup does one 3-second TCP 57223 check and does not send SOAP to that address or walk dozens of services. The entry finishes loading, entities stay unavailable, and startup is no longer held until the 300-second cancel that left the entry in `setup_error`. When the socket accepts again, the next poll reloads and runs a full probe. A module that is already on still probes as before. Hybrid and cloud keep using EMS while LAN is down. If ALL_STATES is rejected but the port is open, per-service reads still run.
 
 ### v1.7.6
 

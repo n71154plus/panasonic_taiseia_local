@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from .const import (
+    AC_MODE_LABELS,
     CLIMATE_AVAILABLE_FAN_MODE,
     CLIMATE_AVAILABLE_INDICATOR,
     CLIMATE_AVAILABLE_MOTION,
@@ -432,13 +433,7 @@ def _on_off(raw: int) -> str:
     return "開" if raw else "關"
 
 
-_AC_MODE_BY_CODE = {
-    0: "冷氣",
-    1: "除濕",
-    2: "送風",
-    3: "自動",
-    4: "暖氣",
-}
+_AC_MODE_BY_CODE = dict(AC_MODE_LABELS)
 
 
 def _decode_ac(service_id: int, val: int) -> str | None:
