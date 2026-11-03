@@ -3,18 +3,18 @@
 Home Assistant custom integration for **Panasonic TaiSEIA** appliances — **LAN and/or Taiwan EMS cloud**, with a per-device control path you can choose.
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Release](https://img.shields.io/github/v/release/n71154plus/panasonic_taiseia_local?label=v1.7.10)](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.10)
+[![Release](https://img.shields.io/github/v/release/n71154plus/panasonic_taiseia_local?label=v1.7.11)](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.11)
 [![Validate](https://github.com/n71154plus/panasonic_taiseia_local/actions/workflows/validate.yml/badge.svg)](https://github.com/n71154plus/panasonic_taiseia_local/actions/workflows/validate.yml)
 
 > **Traditional Chinese:** [README.zh-Hant.md](README.zh-Hant.md)
 
-## What's new in v1.7.10
+## What's new in v1.7.11
 
-- **Observable failures:** diagnostics / probe expose `lan_ok`, control path, EMS cooldown, and credential health; rejected EMS passwords create a HA Repair.
-- **Honest App parity:** docs and options state that hybrid uses EMS (cloud egress); official mold-dry needs preference ON + cloud power-off; UX/VX preference is `0x56`.
-- **Regression tests:** coverage for hybrid offline, credential gating, and diagnostics health fields.
+- **PM2.5 standby broadcast (`0x38`):** exposed as a switch 「PM2.5 關機廣播」— when on (`1`), the module keeps publishing `0x37` about every 5 minutes even while the indoor unit is off.
+- **PM2.5 sensor label:** AC `0x37` is labeled 「PM2.5（約每5分鐘）」with an attribute noting the standby switch.
+- **Cloud timeout soft-keep:** intermittent EMS `TimeoutError` on cloud-only entries (e.g. fridge `0.0.0.0`) keeps the last good poll instead of flapping unavailable.
 
-Full notes: [Release v1.7.10](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.10).
+Full notes: [Release v1.7.11](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.11).
 
 ## Official behavior (read this)
 
@@ -23,9 +23,13 @@ Full notes: [Release v1.7.10](https://github.com/n71154plus/panasonic_taiseia_lo
 
 ## Changelog
 
+### v1.7.11
+
+- See **What's new in v1.7.11** above.
+
 ### v1.7.10
 
-- See **What's new in v1.7.10** above.
+- Observable failures, App-parity honesty, and regression tests (see prior release notes).
 
 ### v1.7.9
 

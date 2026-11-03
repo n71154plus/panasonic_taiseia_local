@@ -75,7 +75,7 @@ class KnownServiceAndClassifyTest(unittest.TestCase):
         services[0x12] = ServiceInfo(0x12, True, 0, 1)  # 濾網
         services[0x15] = ServiceInfo(0x15, False, 0, 15)
         services[0x22] = ServiceInfo(0x22, False, 0, 65535)
-        services[0x38] = ServiceInfo(0x38, False, 0, 1)
+        services[0x38] = ServiceInfo(0x38, True, 0, 3)
         services[0x7A] = ServiceInfo(0x7A, True, 0, 1)
 
         # Remove 0x17 from profile commands to force merge path for 乾燥防霉
@@ -101,10 +101,27 @@ class KnownServiceAndClassifyTest(unittest.TestCase):
         }
         self.assertEqual(kinds[0x17], "switch")
         self.assertEqual(kinds[0x12], "binary_sensor")
-        self.assertEqual(kinds[0x38], "binary_sensor")
+        self.assertEqual(kinds[0x38], "switch")
         self.assertEqual(kinds[0x15], "sensor")
         self.assertEqual(kinds[0x22], "sensor")
         self.assertEqual(kinds[0x7A], "switch")
+        by_class = {
+            item.command.service: item.device_class_hint
+            for item in merged.classified
+            if item.command.service in (0x12,)
+        }
+        # Filter notify is a real warning flag.
+        self.assertEqual(by_class[0x12], "problem")
+        self.assertEqual(by_sid[0x38].name, "PM2.5 關機廣播")
+        # 0x37 comes from extras when absent from CommandList.
+        from panasonic_taiseia_local.catalog import extra_local_sensors
+        from panasonic_taiseia_local.const import TYPE_AC
+
+        extras = {
+            item.command.service: item.command.name
+            for item in extra_local_sensors(TYPE_AC, merged)
+        }
+        self.assertEqual(extras.get(0x37), "PM2.5（約每5分鐘）")
 
     def test_swing_lr_options_use_segments(self) -> None:
         profile = build_profile("PXGD")

@@ -21,6 +21,11 @@ from .entity import TaiSeiaBaseEntity
 PARALLEL_UPDATES = 1
 
 
+def _binary_entity_key(service: int, device_class_hint: str | None) -> str:
+    """Stable unique-id suffix for binary flags."""
+    return f"bin_{service:02x}"
+
+
 async def async_setup_entry(hass, entry, async_add_entities) -> bool:
     client = hass.data[DOMAIN][entry.entry_id][DATA_CLIENT]
     coordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
@@ -42,7 +47,7 @@ async def async_setup_entry(hass, entry, async_add_entities) -> bool:
                     item.command.service,
                     item.command.name,
                     item.icon,
-                    f"bin_{item.command.service:02x}",
+                    _binary_entity_key(item.command.service, item.device_class_hint),
                     BinarySensorDeviceClass.PROBLEM
                     if item.device_class_hint == "problem"
                     else None,
@@ -62,8 +67,10 @@ async def async_setup_entry(hass, entry, async_add_entities) -> bool:
                 item.command.service,
                 item.command.name,
                 item.icon,
-                f"bin_{item.command.service:02x}",
-                BinarySensorDeviceClass.PROBLEM,
+                _binary_entity_key(item.command.service, item.device_class_hint),
+                BinarySensorDeviceClass.PROBLEM
+                if item.device_class_hint == "problem"
+                else None,
             )
         )
 

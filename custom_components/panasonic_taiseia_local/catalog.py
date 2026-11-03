@@ -44,11 +44,12 @@ _EXTRA_AC_SENSORS = (
     (0x24, "室外機電流", "current"),  # compressor current in A (verified vs 0x27)
     (0x27, "即時功率", "power"),
     (0x29, "顯示錯誤", None),
-    (0x37, "PM2.5", "pm25"),
+    # Module publishes a fresh µg/m³ sample about every 5 minutes when 0x38 is on.
+    (0x37, "PM2.5（約每5分鐘）", "pm25"),
 )
+# (service, label, device_class_hint) — "problem" only for real fault/warning flags.
 _EXTRA_AC_BINARY = (
-    (0x12, "濾網清洗通知"),
-    (0x38, "PM2.5 旗標"),
+    (0x12, "濾網清洗通知", "problem"),
 )
 
 # Prefer these kinds when building from device 0x07 (overrides span heuristics).
@@ -77,7 +78,7 @@ _AC_SERVICE_KIND: dict[int, str] = {
     0x2F: "sensor",
     0x30: "sensor",
     0x33: "sensor",
-    0x38: "binary_sensor",  # PM2.5 旗標
+    0x38: "switch",  # PM2.5 關機廣播（=1 時關機仍約每 5 分鐘廣播 0x37）
 }
 # MHW/F-YV air-quality services: absent from the module's advertised service
 # list (12 entries) yet readable over LAN — verified on F-YV32MH via
@@ -393,6 +394,19 @@ def _is_binary_name(name: str) -> bool:
     )
 
 
+def _binary_device_class_hint(service_id: int, name: str) -> str | None:
+    """Map binary TaiSEIA flags to HA device classes.
+
+    Names mentioning PM2.5 must not use ``problem`` (not a fault flag).
+    """
+    upper = name.upper()
+    if "PM2.5" in name or "PM25" in upper:
+        return None
+    if _is_binary_name(name):
+        return "problem"
+    return None
+
+
 def _sensor_hint(name: str) -> str | None:
     if "溫" in name:
         return "temperature"
@@ -466,12 +480,11 @@ def classify_command(cmd: CommandDef, device_type: int) -> ClassifiedCommand:
             )
 
     if pt == "binary":
-        hint = "problem" if _is_binary_name(cmd.name) else None
         return ClassifiedCommand(
             command=cmd,
             kind="binary_sensor",
             icon=icon,
-            device_class_hint=hint,
+            device_class_hint=_binary_device_class_hint(cmd.service, cmd.name),
         )
 
     if pt == "enum":
@@ -522,7 +535,7 @@ def classify_command(cmd: CommandDef, device_type: int) -> ClassifiedCommand:
             command=cmd,
             kind="binary_sensor",
             icon=icon,
-            device_class_hint="problem",
+            device_class_hint=_binary_device_class_hint(cmd.service, cmd.name),
         )
     return ClassifiedCommand(
         command=cmd,
@@ -883,7 +896,7 @@ def extra_local_binaries(sa_type_id: int, profile: DeviceProfile | None) -> list
     present = {c.service for c in (profile.commands if profile else [])}
     extras: list[ClassifiedCommand] = []
     if sa_type_id == TYPE_AC:
-        for sid, name in _EXTRA_AC_BINARY:
+        for sid, name, hint in _EXTRA_AC_BINARY:
             if sid in present:
                 continue
             extras.append(
@@ -891,7 +904,7 @@ def extra_local_binaries(sa_type_id: int, profile: DeviceProfile | None) -> list
                     command=CommandDef(sid, name, "", [], ""),
                     kind="binary_sensor",
                     icon=_icon_for(name),
-                    device_class_hint="problem",
+                    device_class_hint=hint,
                 )
             )
     return extras

@@ -816,6 +816,22 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         f"{type(err).__name__}: {err}"
                     ) from err
             else:
+                from .ems_transport import CloudTimeout
+
+                # EMS occasionally times out (TW cloud jitter). Keep last good
+                # poll so fridge/cloud-only entities do not flap unavailable.
+                if isinstance(err, CloudTimeout) or (
+                    "TimeoutError" in f"{type(err).__name__}: {err}"
+                ):
+                    prev = getattr(coordinator, "data", None)
+                    if prev:
+                        _LOGGER.warning(
+                            "TaiSEIA cloud poll timed out for %s; "
+                            "keeping last data (%s)",
+                            (live or entry).title or current_host,
+                            err,
+                        )
+                        return prev
                 raise UpdateFailed(
                     f"TaiSEIA cloud update failed: {type(err).__name__}: {err}"
                 ) from err
