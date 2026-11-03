@@ -19,6 +19,7 @@ import aiohttp
 from .ems_transport import (
     CloudApiError,
     CloudAuthError,
+    CloudCredentialsInvalid,
     CloudDeviceOffline,
     CloudRateLimited,
     EmsGate,
@@ -43,6 +44,55 @@ _USER_INFO = "/UserGetInfo"
 # One in-flight re-login per account so parallel cloud polls do not stampede EMS.
 _reauth_locks: dict[str, asyncio.Lock] = {}
 _reauth_tokens: dict[str, tuple[str | None, str | None]] = {}
+# Password login rejected → stop hammering EMS until the user completes reauth.
+_credentials_invalid: dict[str, str] = {}
+_reauth_notified: set[str] = set()
+
+
+def _account_key(account: str) -> str:
+    return (account or "").strip().lower()
+
+
+def credentials_rejected(account: str) -> bool:
+    """True when a password login for this EMS account was rejected."""
+    return _account_key(account) in _credentials_invalid
+
+
+def credentials_reject_reason(account: str) -> str | None:
+    return _credentials_invalid.get(_account_key(account))
+
+
+def mark_credentials_rejected(account: str, reason: str) -> None:
+    """Remember a bad password so polls stop calling /userlogin1."""
+    key = _account_key(account)
+    if not key:
+        return
+    msg = (reason or "credentials rejected")[:200]
+    first = key not in _credentials_invalid
+    _credentials_invalid[key] = msg
+    if first:
+        _LOGGER.error(
+            "EMS rejected password login for %s; "
+            "stopping retries until the hub is reauthenticated (%s)",
+            key,
+            msg[:120],
+        )
+
+
+def clear_credentials_rejected(account: str) -> None:
+    """Clear the reject gate after a successful login / reauth."""
+    key = _account_key(account)
+    _credentials_invalid.pop(key, None)
+    _reauth_notified.discard(key)
+
+
+def take_reauth_notify_slot(account: str) -> bool:
+    """Return True once per rejection cycle so only one reauth flow is started."""
+    key = _account_key(account)
+    if not key or key in _reauth_notified:
+        return False
+    _reauth_notified.add(key)
+    return True
 
 _MAC_RE = re.compile(r"^[0-9A-Fa-f]{12}$")
 _IPV4_RE = re.compile(
@@ -57,12 +107,18 @@ __all__ = [
     "CloudAccount",
     "CloudApiError",
     "CloudAuthError",
+    "CloudCredentialsInvalid",
     "CloudDevice",
     "CloudDeviceOffline",
     "CloudRateLimited",
+    "clear_credentials_rejected",
     "command_type_hex",
+    "credentials_reject_reason",
+    "credentials_rejected",
+    "mark_credentials_rejected",
     "parse_device_get_info",
     "parse_gw_ip_payload",
+    "take_reauth_notify_slot",
 ]
 
 
@@ -219,28 +275,50 @@ class CloudAccount:
         )
 
     async def login(self) -> None:
-        data = await self._raw(
-            "POST",
-            _LOGIN,
-            json_body={
-                "MemId": self.account,
-                "PW": self.password,
-                "AppToken": APP_TOKEN,
-            },
-            priority=RequestPriority.USER,
-        )
+        if credentials_rejected(self.account):
+            raise CloudCredentialsInvalid(
+                credentials_reject_reason(self.account) or "credentials rejected"
+            )
+        try:
+            data = await self._raw(
+                "POST",
+                _LOGIN,
+                json_body={
+                    "MemId": self.account,
+                    "PW": self.password,
+                    "AppToken": APP_TOKEN,
+                },
+                priority=RequestPriority.USER,
+            )
+        except CloudRateLimited:
+            # Transient — keep retrying with transport backoff; do not lock the account.
+            raise
+        except CloudAuthError as err:
+            mark_credentials_rejected(self.account, str(err))
+            raise CloudCredentialsInvalid(str(err)) from err
         if not isinstance(data, dict) or "CPToken" not in data or "RefreshToken" not in data:
-            raise CloudAuthError(str(data)[:200])
+            msg = str(data)[:200] if data is not None else "empty login response"
+            mark_credentials_rejected(self.account, msg)
+            raise CloudCredentialsInvalid(msg)
+        clear_credentials_rejected(self.account)
         self.cp_token = data["CPToken"]
         self.refresh_token = data["RefreshToken"]
 
     async def ensure_login(self) -> None:
+        if credentials_rejected(self.account):
+            raise CloudCredentialsInvalid(
+                credentials_reject_reason(self.account) or "credentials rejected"
+            )
         if self.cp_token:
             return
         if self.refresh_token:
             try:
                 await self.refresh()
                 return
+            except CloudRateLimited:
+                raise
+            except CloudCredentialsInvalid:
+                raise
             except (CloudAuthError, CloudApiError):
                 _LOGGER.debug("Refresh failed; falling back to password login")
         await self.login()
@@ -250,7 +328,15 @@ class CloudAccount:
 
     async def _reauthenticate(self, rejected: str | None) -> None:
         """Drop a rejected CPToken, then refresh or password-login once."""
+        if credentials_rejected(self.account):
+            raise CloudCredentialsInvalid(
+                credentials_reject_reason(self.account) or "credentials rejected"
+            )
         async with self._reauth_lock():
+            if credentials_rejected(self.account):
+                raise CloudCredentialsInvalid(
+                    credentials_reject_reason(self.account) or "credentials rejected"
+                )
             shared = _reauth_tokens.get(self.account)
             if shared and shared[0] and shared[0] != rejected:
                 self.cp_token = shared[0]
@@ -295,11 +381,15 @@ class CloudAccount:
         await self.ensure_login()
         try:
             return await factory()
+        except CloudCredentialsInvalid:
+            raise
         except CloudAuthError as err:
             rejected = self.cp_token
             await self._reauthenticate(rejected)
             try:
                 return await factory()
+            except CloudCredentialsInvalid:
+                raise
             except CloudAuthError:
                 _LOGGER.warning("EMS still rejected CPToken after re-login: %s", err)
                 raise

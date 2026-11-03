@@ -3,22 +3,27 @@
 Home Assistant custom integration for **Panasonic TaiSEIA** appliances — **LAN and/or Taiwan EMS cloud**, with a per-device control path you can choose.
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Release](https://img.shields.io/github/v/release/n71154plus/panasonic_taiseia_local?label=v1.7.8)](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.8)
+[![Release](https://img.shields.io/github/v/release/n71154plus/panasonic_taiseia_local?label=v1.7.9)](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.9)
 [![Validate](https://github.com/n71154plus/panasonic_taiseia_local/actions/workflows/validate.yml/badge.svg)](https://github.com/n71154plus/panasonic_taiseia_local/actions/workflows/validate.yml)
 
 > **Traditional Chinese:** [README.zh-Hant.md](README.zh-Hant.md)
 
-## What's new in v1.7.8
+## What's new in v1.7.9
 
-- **Comfort cool (#19):** CS-VX22BA2 (VX) and similar units use `0x01=5` for 舒適冷房. While powered on with that (or another non-HVAC) mode code, climate no longer falsely reports OFF. Selection uses the climate **preset** `comfort` (not a custom HVACMode); turn-on resumes raw mode `5`. VX/UX CommandList labels updated.
+- **Stop retrying a rejected EMS password:** when the stored account password stops working (changed in the official app, account locked), the integration no longer re-posts it every poll. Password login is gated, the hub starts a reauthentication flow (`async_step_reauth`), and network / rate-limit errors still retry with backoff.
 
-Full notes: [Release v1.7.8](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.8).
+Full notes: [Release v1.7.9](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.9).
 
 ## Changelog
 
+### v1.7.9
+
+- See **What's new in v1.7.9** above.
+- Also includes PR #21: hybrid entries without cloud recover via the LAN offline / port-check path after a module power loss.
+
 ### v1.7.8
 
-- See **What's new in v1.7.8** above.
+- **Comfort cool (#19):** CS-VX22BA2 (VX) and similar units use `0x01=5` for 舒適冷房. While powered on with that (or another non-HVAC) mode code, climate no longer falsely reports OFF. Selection uses the climate **preset** `comfort` (not a custom HVACMode); turn-on resumes raw mode `5`.
 
 ### v1.7.7
 
@@ -199,7 +204,7 @@ AC and dehumidifier devices expose many entities on one HA device (setpoint, swi
 Replace `climate.livingroom` with your entity ID:
 
 ```yaml
-type: custom:universal-device-card
+type: custom:n71154-device-card
 entity: climate.livingroom
 layout: standard          # standard | mini | bar
 language: en              # auto | en | zh-TW | zh-CN | ja
@@ -209,7 +214,7 @@ disable_popup: false      # false = top-right opens same-device popup
 Compact row:
 
 ```yaml
-type: custom:universal-device-card
+type: custom:n71154-device-card
 entity: climate.bedroom
 layout: mini
 language: en
@@ -218,7 +223,7 @@ language: en
 Optional popup filters (e.g. sensors + controls only):
 
 ```yaml
-type: custom:universal-device-card
+type: custom:n71154-device-card
 entity: climate.livingroom
 language: en
 include_domains: sensor,switch,select,number

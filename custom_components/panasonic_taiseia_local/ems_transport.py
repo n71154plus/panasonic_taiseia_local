@@ -50,6 +50,14 @@ class CloudAuthError(Exception):
     """Login / token failure."""
 
 
+class CloudCredentialsInvalid(CloudAuthError):
+    """Stored EMS username/password were rejected.
+
+    Distinct from a short-lived CPToken/RefreshToken expiry: the password
+    itself must not be retried until the user updates it via reauth.
+    """
+
+
 class CloudApiError(Exception):
     """Unexpected API response."""
 

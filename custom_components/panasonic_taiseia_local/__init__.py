@@ -10,6 +10,7 @@ import time
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_NAME
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -142,6 +143,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def _async_setup_hub(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Hub holds cloud credentials + shared settings + house energy sensor."""
+    from .cloud import credentials_reject_reason, credentials_rejected
+
+    username = (entry.data.get(CONF_USERNAME) or "").strip()
+    if username and credentials_rejected(username):
+        raise ConfigEntryAuthFailed(
+            credentials_reject_reason(username)
+            or "EMS credentials rejected; reauthentication required"
+        )
+
     lan = await async_get_lan_settings(hass)
     configure_lan_concurrency(lan.max_concurrent)
     await async_ensure_hub_device(hass, entry)
@@ -720,6 +730,17 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 lan_ok = True
                 control.lan_ok = True
         except Exception as err:
+            from .cloud import CloudCredentialsInvalid
+            from .control import async_trigger_hub_reauth
+
+            async def _reraise_credentials(exc: BaseException) -> None:
+                if isinstance(exc, CloudCredentialsInvalid):
+                    await async_trigger_hub_reauth(hass, live or entry)
+                    raise UpdateFailed(
+                        f"TaiSEIA EMS credentials rejected for {current_host}: {exc}"
+                    ) from exc
+
+            await _reraise_credentials(err)
             if is_lan_transport_error(err):
                 # Host stopped answering. Drop stale "on" state. One slow
                 # ALL_STATES already ran; further polls take the port check.
@@ -733,6 +754,7 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     try:
                         status, path = await control.async_fetch_status(cloud_types)
                     except Exception as err_cloud:
+                        await _reraise_credentials(err_cloud)
                         raise UpdateFailed(
                             f"TaiSEIA update failed for {current_host}: "
                             f"{type(err_cloud).__name__}: {err_cloud}"
@@ -759,6 +781,7 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                             lan_ok = True
                             control.lan_ok = True
                         except Exception as err2:
+                            await _reraise_credentials(err2)
                             raise UpdateFailed(
                                 f"TaiSEIA update failed for {rebound}: "
                                 f"{type(err2).__name__}: {err2}"
@@ -774,6 +797,7 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                                     cloud_types
                                 )
                             except Exception as err3:
+                                await _reraise_credentials(err3)
                                 raise UpdateFailed(
                                     f"TaiSEIA update failed for {current_host}: "
                                     f"{type(err3).__name__}: {err3}"
@@ -882,6 +906,14 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except UpdateFailed:
             raise
         except Exception as err:
+            from .cloud import CloudCredentialsInvalid
+            from .control import async_trigger_hub_reauth
+
+            if isinstance(err, CloudCredentialsInvalid):
+                await async_trigger_hub_reauth(hass, live or entry)
+                raise UpdateFailed(
+                    f"TaiSEIA EMS credentials rejected for {current_host}: {err}"
+                ) from err
             raise UpdateFailed(
                 f"TaiSEIA update failed for {current_host}: "
                 f"{type(err).__name__}: {err}"

@@ -9,6 +9,7 @@ Advanced: local-only discovery / manual IP (no cloud).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
@@ -27,7 +28,15 @@ from .catalog import (
     model_type_matches_device,
     resolve_model_type,
 )
-from .cloud import CloudAccount, CloudAuthError, CloudApiError, CloudDevice
+from .cloud import (
+    CloudAccount,
+    CloudApiError,
+    CloudAuthError,
+    CloudCredentialsInvalid,
+    CloudDevice,
+    CloudRateLimited,
+    clear_credentials_rejected,
+)
 from .cloud_sync import (
     async_sync_cloud_to_devices,
     cloud_fields_from_device,
@@ -173,6 +182,73 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if config_entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_HUB:
             return HubOptionsFlowHandler()
         return DeviceOptionsFlowHandler()
+
+    async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> FlowResult:
+        """Start reauthentication when EMS rejects the stored password."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Ask for a new EMS password and update the hub entry."""
+        self._errors = {}
+        reauth_entry = self._get_reauth_entry()
+        # Credentials live on the hub. If a device entry somehow triggered
+        # reauth, update the hub instead.
+        hub = reauth_entry
+        if hub.data.get(CONF_ENTRY_TYPE) != ENTRY_TYPE_HUB:
+            linked = _hub_entry(self.hass)
+            if linked is None:
+                return self.async_abort(reason="reauth_no_hub")
+            hub = linked
+        username = (hub.data.get(CONF_USERNAME) or "").strip()
+        if user_input is not None:
+            password = user_input[CONF_PASSWORD]
+            session = async_get_clientsession(self.hass)
+            from .control import async_get_shared_gate
+
+            gate = await async_get_shared_gate(self.hass)
+            # Allow a fresh login attempt even if a prior poll locked the account.
+            clear_credentials_rejected(username)
+            client = CloudAccount(session, username, password, gate=gate)
+            try:
+                await client.login()
+            except CloudCredentialsInvalid:
+                self._errors["base"] = "auth"
+            except CloudAuthError:
+                self._errors["base"] = "auth"
+            except CloudRateLimited:
+                self._errors["base"] = "cloud_api"
+            except CloudApiError:
+                self._errors["base"] = "cloud_api"
+            except Exception:  # noqa: BLE001
+                self._errors["base"] = "cloud_api"
+            else:
+                if reauth_entry.entry_id == hub.entry_id:
+                    await self.async_set_unique_id(f"hub:{username.lower()}")
+                    self._abort_if_unique_id_mismatch(reason="unique_id_mismatch")
+                clear_credentials_rejected(username)
+                return self.async_update_reload_and_abort(
+                    hub,
+                    data_updates={
+                        CONF_PASSWORD: password,
+                        CONF_CP_TOKEN: client.cp_token,
+                        CONF_REFRESH_TOKEN: client.refresh_token,
+                    },
+                )
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_PASSWORD): str,
+                }
+            ),
+            errors=self._errors,
+            description_placeholders={
+                "account": mask_account(username) if username else username,
+            },
+        )
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -819,9 +895,11 @@ class HubOptionsFlowHandler(config_entries.OptionsFlow):
                     gate=gate,
                 )
                 try:
+                    clear_credentials_rejected(new_data.get(CONF_USERNAME, ""))
                     await cloud.login()
                     new_data[CONF_CP_TOKEN] = cloud.cp_token
                     new_data[CONF_REFRESH_TOKEN] = cloud.refresh_token
+                    clear_credentials_rejected(new_data.get(CONF_USERNAME, ""))
                 except Exception:  # noqa: BLE001
                     return self.async_show_form(
                         step_id="init",

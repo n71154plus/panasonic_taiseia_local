@@ -13,9 +13,12 @@ from .cloud import (
     CloudAccount,
     CloudApiError,
     CloudAuthError,
+    CloudCredentialsInvalid,
     CloudDeviceOffline,
     CloudRateLimited,
     command_type_hex,
+    credentials_rejected,
+    take_reauth_notify_slot,
 )
 from .const import (
     CONF_CLOUD_AUTH,
@@ -104,6 +107,25 @@ async def async_get_cloud_account(
     )
 
 
+async def async_trigger_hub_reauth(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
+    """Start a hub reauth flow once after EMS rejects the stored password."""
+    hub = _hub_entry(hass, entry)
+    if hub is None and entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_HUB:
+        hub = entry
+    if hub is None:
+        return
+    account = hub.data.get(CONF_USERNAME) or ""
+    if not take_reauth_notify_slot(account):
+        return
+    _LOGGER.warning(
+        "EMS credentials for %s rejected; starting reauthentication",
+        hub.title or account,
+    )
+    hub.async_start_reauth(hass)
+
+
 async def async_refresh_cloud_auth(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -119,15 +141,25 @@ async def async_refresh_cloud_auth(
     auth = (entry.data.get(CONF_CLOUD_AUTH) or "").strip()
     if gwid and auth and not force:
         return gwid, auth
+    hub = _hub_entry(hass, entry)
+    if hub is None and entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_HUB:
+        hub = entry
+    if hub is not None and credentials_rejected(hub.data.get(CONF_USERNAME) or ""):
+        await async_trigger_hub_reauth(hass, entry)
+        raise CloudCredentialsInvalid(
+            "EMS credentials rejected; reauthentication required"
+        )
     cloud = await async_get_cloud_account(hass, entry)
     if cloud is None:
         return (gwid, auth) if gwid and auth else None
     try:
         devices = await cloud.async_get_devices()
+    except CloudCredentialsInvalid:
+        await async_trigger_hub_reauth(hass, entry)
+        raise
     except Exception as err:  # noqa: BLE001
         _LOGGER.debug("refresh cloud auth failed: %s", err)
         return (gwid, auth) if gwid and auth and not force else None
-    hub = _hub_entry(hass, entry)
     if hub is not None and (cloud.cp_token or cloud.refresh_token):
         new_hub = dict(hub.data)
         if cloud.cp_token:
@@ -249,6 +281,9 @@ class DeviceControl:
                     value=value,
                     priority=RequestPriority.USER,
                 )
+            except CloudCredentialsInvalid:
+                await async_trigger_hub_reauth(self.hass, live)
+                raise
             except CloudAuthError:
                 await self._save_cloud_tokens(live, cloud)
                 self._cloud = None
@@ -294,6 +329,9 @@ class DeviceControl:
                     command_types=types,
                     priority=RequestPriority.BACKGROUND,
                 )
+            except CloudCredentialsInvalid:
+                await async_trigger_hub_reauth(self.hass, live)
+                raise
             except CloudAuthError:
                 await self._save_cloud_tokens(live, cloud)
                 self._cloud = None

@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .cloud import CloudAccount, CloudDevice
+from .cloud import CloudAccount, CloudCredentialsInvalid, CloudDevice
 from .const import (
     CONF_CLOUD_AUTH,
     CONF_CLOUD_DEVICE_TYPE,
@@ -166,6 +166,12 @@ async def async_sync_cloud_to_devices(
     await async_load_catalog(hass)
     try:
         devices = await async_fetch_cloud_devices(hass, hub)
+    except CloudCredentialsInvalid as err:
+        from .control import async_trigger_hub_reauth
+
+        _LOGGER.warning("Cloud sync stopped; EMS credentials rejected: %s", err)
+        await async_trigger_hub_reauth(hass, hub)
+        return 0
     except Exception as err:  # noqa: BLE001
         _LOGGER.warning("Cloud sync failed: %s", err)
         return 0

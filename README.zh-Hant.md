@@ -3,22 +3,27 @@
 Home Assistant 自訂整合：控制配備 **TaiSEIA** 的 Panasonic 家電，支援**區網 LAN**與台灣 **EMS 雲端**，並可**每機選擇**控制路徑。
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Release](https://img.shields.io/github/v/release/n71154plus/panasonic_taiseia_local?label=v1.7.8)](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.8)
+[![Release](https://img.shields.io/github/v/release/n71154plus/panasonic_taiseia_local?label=v1.7.9)](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.9)
 [![Validate](https://github.com/n71154plus/panasonic_taiseia_local/actions/workflows/validate.yml/badge.svg)](https://github.com/n71154plus/panasonic_taiseia_local/actions/workflows/validate.yml)
 
 > **English:** [README.md](README.md)
 
-## 最新版本 v1.7.8 變更摘要
+## 最新版本 v1.7.9 變更摘要
 
-- **舒適冷房（#19）：** CS-VX22BA2（VX）等機種以 `0x01=5` 表示舒適冷房。電源開著但模式碼不在標準 HVAC 表內時，不再誤顯示為關機。以 climate **preset**（`comfort`）選取／清除，不新增自訂 HVACMode；關機再開會保留 raw mode `5`。VX／UX CommandList 已補上標籤。
+- **EMS 密碼失效停止重試：** 官網帳號密碼被拒（改密、鎖定）時，不再每 30 秒用舊密碼重登。改為鎖定該帳號的密碼登入、對 hub 啟動重新驗證流程（`async_step_reauth`），網路／限流錯誤仍可退避重試。
 
-完整說明見 [Release v1.7.8](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.8)。
+完整說明見 [Release v1.7.9](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.9)。
 
 ## 更新紀錄
 
+### v1.7.9
+
+- 見上方「最新版本 v1.7.9 變更摘要」。
+- 另含 PR #21：hybrid 且無雲備援時，LAN 斷線可正確進入 offline／port-check 並自動恢復。
+
 ### v1.7.8
 
-- 見上方「最新版本 v1.7.8 變更摘要」。
+- **舒適冷房（#19）：** CS-VX22BA2（VX）等機種以 `0x01=5` 表示舒適冷房。電源開著但模式碼不在標準 HVAC 表內時，不再誤顯示為關機。以 climate **preset**（`comfort`）選取／清除；關機再開保留 raw mode `5`。
 
 ### v1.7.7
 
@@ -198,7 +203,7 @@ Home Assistant 自訂整合：控制配備 **TaiSEIA** 的 Panasonic 家電，�
 將 `climate.livingroom` 換成你的實體 ID：
 
 ```yaml
-type: custom:universal-device-card
+type: custom:n71154-device-card
 entity: climate.livingroom
 layout: standard          # standard | mini | bar
 language: zh-TW           # auto | en | zh-TW | zh-CN | ja
@@ -208,7 +213,7 @@ disable_popup: false      # false = 右上角開啟同裝置彈出層
 精簡列：
 
 ```yaml
-type: custom:universal-device-card
+type: custom:n71154-device-card
 entity: climate.bedroom
 layout: mini
 language: zh-TW
@@ -217,7 +222,7 @@ language: zh-TW
 彈出層可過濾 domain／實體（例如只留感測與開關）：
 
 ```yaml
-type: custom:universal-device-card
+type: custom:n71154-device-card
 entity: climate.livingroom
 language: zh-TW
 include_domains: sensor,switch,select,number

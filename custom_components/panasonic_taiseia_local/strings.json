@@ -52,6 +52,13 @@
           "indoor_model": "Indoor model (optional)",
           "model_type": "ModelType (CommandList)"
         }
+      },
+      "reauth_confirm": {
+        "title": "[%key:common::config_flow::title::reauth%]",
+        "description": "The Panasonic EMS password for {account} was rejected. Enter the current password used in the official app. Password retries have been stopped to avoid locking the account.",
+        "data": {
+          "password": "Password"
+        }
       }
     },
     "error": {
@@ -64,7 +71,9 @@
     "abort": {
       "already_configured": "This device is already configured.",
       "cannot_connect": "Cannot connect to the device.",
-      "devices_imported": "Started importing selected devices."
+      "devices_imported": "Started importing selected devices.",
+      "reauth_no_hub": "No hub account entry to reauthenticate.",
+      "unique_id_mismatch": "Sign in with the same Panasonic EMS account that was originally configured."
     }
   },
   "options": {

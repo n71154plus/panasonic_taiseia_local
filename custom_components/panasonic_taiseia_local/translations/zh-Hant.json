@@ -52,6 +52,13 @@
           "indoor_model": "室內機型號（選填）",
           "model_type": "ModelType（CommandList）"
         }
+      },
+      "reauth_confirm": {
+        "title": "重新驗證整合",
+        "description": "Panasonic EMS 帳號 {account} 的密碼已被拒絕。請輸入與官方 App 相同的目前密碼。整合已停止自動重試密碼，以免帳號被鎖定。",
+        "data": {
+          "password": "密碼"
+        }
       }
     },
     "error": {
@@ -64,7 +71,9 @@
     "abort": {
       "already_configured": "此裝置已設定。",
       "cannot_connect": "無法連線到裝置。",
-      "devices_imported": "已開始匯入所選設備。"
+      "devices_imported": "已開始匯入所選設備。",
+      "reauth_no_hub": "找不到可重新驗證的主設定（帳號）項目。",
+      "unique_id_mismatch": "請使用原本設定的同一個 Panasonic EMS 帳號登入。"
     }
   },
   "options": {
