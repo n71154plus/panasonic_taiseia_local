@@ -67,12 +67,17 @@ sys.path.insert(0, str(ROOT / "custom_components"))
 from panasonic_taiseia_local.const import (  # noqa: E402
     CONF_CONTROL_MODE,
     CONTROL_MODE_CLOUD,
+    CONTROL_MODE_HYBRID,
 )
 from panasonic_taiseia_local.control import DeviceControl  # noqa: E402
 from panasonic_taiseia_local.ems_transport import (  # noqa: E402
     CloudDeviceOffline,
     CloudRateLimited,
     classify_state_msg,
+)
+from panasonic_taiseia_local.taiseia import (  # noqa: E402
+    TaiSeiaCommandError,
+    is_lan_transport_error,
 )
 
 # StateMsg EMS returned for the powered-off washer on a live install.
@@ -142,6 +147,44 @@ class CloudDeviceOfflineTest(unittest.TestCase):
         )
         with self.assertRaises(CloudDeviceOffline):
             asyncio.run(control.async_fetch_status())
+
+
+class HybridWithoutCloudTest(unittest.TestCase):
+    """Hybrid is the default, also for entries that have no cloud account."""
+
+    def _control(self, lan_error: BaseException) -> DeviceControl:
+        entry = SimpleNamespace(
+            entry_id="e1",
+            title="除濕機",
+            data={},
+            options={CONF_CONTROL_MODE: CONTROL_MODE_HYBRID},
+        )
+        hass = SimpleNamespace(
+            config_entries=SimpleNamespace(async_get_entry=lambda _eid: entry)
+        )
+
+        async def _fetch():
+            raise lan_error
+
+        client = SimpleNamespace(
+            host="192.0.2.1", poll_services=[], async_fetch_status=_fetch
+        )
+        return DeviceControl(hass, entry, client, cloud_only=False, lan_ok=True)
+
+    def test_unplugged_module_keeps_transport_error_for_the_poll(self) -> None:
+        # The poll only marks the module offline and watches its port when it
+        # recognises the error; a CloudApiError wrapper left it failing forever.
+        control = self._control(TimeoutError())
+        with self.assertRaises(TimeoutError) as caught:
+            asyncio.run(control.async_fetch_status())
+        self.assertTrue(is_lan_transport_error(caught.exception))
+        self.assertFalse(control.lan_ok)
+
+    def test_rejected_command_is_not_reported_as_transport_error(self) -> None:
+        control = self._control(TaiSeiaCommandError("rejected"))
+        with self.assertRaises(Exception) as caught:
+            asyncio.run(control.async_fetch_status())
+        self.assertFalse(is_lan_transport_error(caught.exception))
 
 
 if __name__ == "__main__":

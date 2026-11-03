@@ -38,7 +38,7 @@ from .const import (
 )
 from .ems_transport import EmsGate, EmsSettings, RequestPriority
 from .entry_helpers import async_update_entry_data
-from .taiseia import TaiSeiaClient
+from .taiseia import TaiSeiaClient, is_lan_transport_error
 
 _LOGGER = logging.getLogger(__package__)
 
@@ -400,6 +400,7 @@ class DeviceControl:
             return status, "cloud"
 
         # hybrid: LAN first, cloud assist
+        lan_transport_err: BaseException | None = None
         if self.can_use_lan():
             try:
                 status = await _lan()
@@ -409,6 +410,8 @@ class DeviceControl:
                 errors.append(f"lan:{err}")
                 _LOGGER.debug("hybrid read LAN failed (%s); trying cloud", err)
                 self.lan_ok = False
+                if is_lan_transport_error(err):
+                    lan_transport_err = err
         if self.can_use_cloud():
             try:
                 status = await self._cloud_status(command_types)
@@ -417,6 +420,10 @@ class DeviceControl:
             except Exception as err:  # noqa: BLE001
                 errors.append(f"cloud:{err}")
                 raise CloudApiError("; ".join(errors)) from err
+        # No cloud to fall back on: keep the transport error so the poll marks
+        # the module offline and watches its port instead of failing forever.
+        if lan_transport_err is not None:
+            raise lan_transport_err
         raise CloudApiError("; ".join(errors) or "no read path available")
 
 
