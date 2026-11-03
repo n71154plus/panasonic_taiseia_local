@@ -73,6 +73,7 @@ from panasonic_taiseia_local.control import DeviceControl  # noqa: E402
 from panasonic_taiseia_local.ems_transport import (  # noqa: E402
     CloudDeviceOffline,
     CloudRateLimited,
+    CloudTimeout,
     classify_state_msg,
 )
 from panasonic_taiseia_local.taiseia import (  # noqa: E402
@@ -135,6 +136,16 @@ class CloudDeviceOfflineTest(unittest.TestCase):
             cloud_only=True, lan_ok=False, replies=[CloudRateLimited("429")]
         )
         with self.assertRaises(CloudRateLimited):
+            asyncio.run(control.async_fetch_status())
+
+    def test_cloud_timeout_still_surfaces_for_coordinator(self) -> None:
+        # Soft-keep of last data lives in the coordinator, not DeviceControl.
+        control = _control(
+            cloud_only=True,
+            lan_ok=False,
+            replies=[CloudTimeout("TimeoutError: ")],
+        )
+        with self.assertRaises(CloudTimeout):
             asyncio.run(control.async_fetch_status())
 
     def test_unprobed_lan_module_keeps_failing_for_setup_retry(self) -> None:

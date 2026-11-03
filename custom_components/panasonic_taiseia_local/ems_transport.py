@@ -70,6 +70,10 @@ class CloudDeviceOffline(CloudApiError):
     """Device unreachable via EMS."""
 
 
+class CloudTimeout(CloudApiError):
+    """EMS HTTP call timed out (transient; next poll usually recovers)."""
+
+
 @dataclass
 class EmsSettings:
     min_interval: float = DEFAULT_EMS_MIN_INTERVAL
@@ -315,6 +319,7 @@ class EmsTransport:
         expect_json: bool,
     ) -> Any:
         last_rate = False
+        last_timeout = False
         last_err = ""
         timeout = aiohttp.ClientTimeout(total=self.settings.timeout)
         bases = self._available_bases()
@@ -396,9 +401,15 @@ class EmsTransport:
                 raise
             except Exception as err:  # noqa: BLE001
                 last_err = f"{type(err).__name__}: {err}"
+                if isinstance(err, (TimeoutError, asyncio.TimeoutError)) or type(
+                    err
+                ).__name__ in ("TimeoutError", "ServerTimeoutError"):
+                    last_timeout = True
                 _LOGGER.debug("EMS request to %s failed: %s", base, last_err)
                 continue
 
         if last_rate or self.in_cooldown():
             raise CloudRateLimited(last_err or "EMS rate limited")
+        if last_timeout:
+            raise CloudTimeout(last_err or "EMS request timed out")
         raise CloudApiError(last_err or "EMS request failed")

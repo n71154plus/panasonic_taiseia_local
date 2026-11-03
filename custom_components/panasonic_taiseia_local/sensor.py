@@ -576,6 +576,15 @@ class TaiSeiaNumericSensor(TaiSeiaBaseEntity, SensorEntity):
             return round(value * self._scale, 2)
         return value
 
+    @property
+    def extra_state_attributes(self) -> dict | None:
+        # AC 0x37: ~every 5 minutes; 0x38 keeps it publishing while the unit is off.
+        if self._service == 0x37:
+            return {
+                "說明": "約每5分鐘更新一次；開啟「PM2.5 關機廣播」（0x38）後，關機仍會持續回報",
+            }
+        return None
+
 
 class TaiSeiaGenericSensor(TaiSeiaBaseEntity, SensorEntity):
     def __init__(

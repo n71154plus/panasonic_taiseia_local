@@ -3,18 +3,18 @@
 Home Assistant 自訂整合：控制配備 **TaiSEIA** 的 Panasonic 家電，支援**區網 LAN**與台灣 **EMS 雲端**，並可**每機選擇**控制路徑。
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Release](https://img.shields.io/github/v/release/n71154plus/panasonic_taiseia_local?label=v1.7.10)](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.10)
+[![Release](https://img.shields.io/github/v/release/n71154plus/panasonic_taiseia_local?label=v1.7.11)](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.11)
 [![Validate](https://github.com/n71154plus/panasonic_taiseia_local/actions/workflows/validate.yml/badge.svg)](https://github.com/n71154plus/panasonic_taiseia_local/actions/workflows/validate.yml)
 
 > **English:** [README.md](README.md)
 
-## 最新版本 v1.7.10 變更摘要
+## 最新版本 v1.7.11 變更摘要
 
-- **可觀測失敗：** diagnostics／probe 露出 `lan_ok`、控制路徑、EMS 冷卻與帳號狀態；EMS 密碼被拒時建立 HA Repair。
-- **官方行為誠實對齊：** 文件與設定說明寫清 hybrid 會走雲端；乾燥防霉官方路徑是「偏好開＋雲端關機」；UX/VX 偏好服務 `0x56`。
-- **回歸測試：** 補強 hybrid 離線、帳號閘門、diagnostics 健康欄位。
+- **PM2.5 關機廣播（`0x38`）：** 改為開關「PM2.5 關機廣播」；開啟（`1`）時即使冷氣關機，模組仍約每 5 分鐘廣播 `0x37`。
+- **PM2.5 感測器標籤：** 冷氣 `0x37` 顯示為「PM2.5（約每5分鐘）」，屬性說明需開開關機廣播才會在關機後持續回報。
+- **雲端逾時軟保留：** 純雲端裝置（例如冰箱 `0.0.0.0`）偶發 EMS `TimeoutError` 時保留上次成功資料，避免實體短暫 unavailable。
 
-完整說明見 [Release v1.7.10](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.10)。
+完整說明見 [Release v1.7.11](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.11)。
 
 ## 官方行為對齊（請先讀）
 
@@ -23,9 +23,13 @@ Home Assistant 自訂整合：控制配備 **TaiSEIA** 的 Panasonic 家電，�
 
 ## 更新紀錄
 
+### v1.7.11
+
+- 見上方「最新版本 v1.7.11 變更摘要」。
+
 ### v1.7.10
 
-- 見上方「最新版本 v1.7.10 變更摘要」。
+- 可觀測失敗、官方行為誠實對齊、回歸測試（見先前 release 說明）。
 
 ### v1.7.9
 

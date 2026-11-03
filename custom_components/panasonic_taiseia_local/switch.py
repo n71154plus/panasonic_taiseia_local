@@ -93,6 +93,15 @@ class TaiSeiaSwitch(TaiSeiaBaseEntity, SwitchEntity):
         raw = self.status_bool(self._status_key)
         return (not raw) if self._inverted else raw
 
+    @property
+    def extra_state_attributes(self) -> dict | None:
+        # 0x38=1 keeps publishing 0x37 even while powered off (~every 5 minutes).
+        if self._service == 0x38:
+            return {
+                "說明": "開啟（1）時即使冷氣關機，模組仍約每5分鐘廣播 PM2.5（0x37）；關閉則停止廣播",
+            }
+        return None
+
     async def async_turn_on(self, **kwargs) -> None:
         await self._async_set(True)
 
