@@ -16,11 +16,18 @@ from .const import (
     CONF_REFRESH_TOKEN,
     CONF_USERNAME,
     DATA_CLIENT,
+    DATA_CONTROL,
     DATA_COORDINATOR,
     DATA_PROFILE,
     DOMAIN,
     ENTRY_TYPE_DEVICE,
     ENTRY_TYPE_HUB,
+)
+from .observability import (
+    MOLD_DRY_BEHAVIOR,
+    auth_health_snapshot,
+    control_health_snapshot,
+    ems_health_snapshot,
 )
 from .probe_info import (
     decode_status_value,
@@ -226,6 +233,14 @@ def build_device_snapshot(
         "coordinator_ok": coordinator_ok,
         "poll_interval": poll_interval,
         "lan": lan or {},
+        "behavior": {
+            "mold_dry": MOLD_DRY_BEHAVIOR,
+            "default_control_mode": "hybrid",
+            "hybrid_note": (
+                "Default hybrid uses EMS for writes when available "
+                "(cloud egress); LAN-first for reads."
+            ),
+        },
     }
     if extra:
         for key in (
@@ -235,6 +250,9 @@ def build_device_snapshot(
             "cloud_model_id",
             "cloud_model_type",
             "cloud_gwid",
+            "control",
+            "auth",
+            "ems",
         ):
             val = extra.get(key)
             if val not in (None, ""):
@@ -286,6 +304,27 @@ def probe_sensor_attributes(snapshot: dict[str, Any]) -> dict[str, Any]:
         attrs["LAN重試"] = lan.get("retries")
     if lan.get("max_concurrent") is not None:
         attrs["LAN併發上限"] = lan.get("max_concurrent")
+    control = snapshot.get("control") or {}
+    if control.get("control_mode") is not None:
+        attrs["控制模式"] = control.get("control_mode")
+    if control.get("last_path") is not None:
+        attrs["最近控制路徑"] = control.get("last_path")
+    if control.get("lan_ok") is not None:
+        attrs["LAN可用"] = control.get("lan_ok")
+    auth = snapshot.get("auth") or {}
+    if auth.get("credentials_ok") is not None:
+        attrs["EMS帳號正常"] = auth.get("credentials_ok")
+    if auth.get("credentials_reject_reason"):
+        attrs["EMS帳號拒絕原因"] = auth.get("credentials_reject_reason")
+    ems = snapshot.get("ems") or {}
+    transport = (ems.get("transport") or {}) if isinstance(ems, dict) else {}
+    if transport.get("in_cooldown") is not None:
+        attrs["EMS冷卻中"] = transport.get("in_cooldown")
+    if ems.get("queue_depth") is not None:
+        attrs["EMS佇列深度"] = ems.get("queue_depth")
+    attrs["乾燥防霉說明"] = (
+        "官方流程：偏好開啟時由雲端關機觸發；本機 0x00=0 在實測 RX-20 模組不會啟動正式乾燥。"
+    )
     for key, label in (
         ("cloud_nickname", "官網暱稱"),
         ("cloud_model", "官網機型"),
@@ -335,11 +374,14 @@ async def async_build_device_diagnostics(
     poll_interval = None
     extra: dict[str, Any] = {}
     coordinator_ok = None
+    control = domain_data.get(DATA_CONTROL)
+    cloud_only = bool(entry.data.get("cloud_only"))
     if coordinator is not None:
         coordinator_ok = coordinator.last_update_success
         data = coordinator.data or {}
         status = dict(data.get("status") or {})
         poll_interval = data.get("poll_interval")
+        cloud_only = bool(data.get("cloud_only", cloud_only))
         for key in (
             "model_type",
             "indoor_model",
@@ -352,6 +394,25 @@ async def async_build_device_diagnostics(
         ):
             if key in data:
                 extra[key] = data[key]
+        if isinstance(data.get("control"), dict):
+            extra["control"] = data["control"]
+        if isinstance(data.get("auth"), dict):
+            extra["auth"] = data["auth"]
+        if isinstance(data.get("ems"), dict):
+            extra["ems"] = data["ems"]
+
+    if "control" not in extra:
+        extra["control"] = control_health_snapshot(
+            control=control, entry=entry, cloud_only=cloud_only
+        )
+    if "auth" not in extra:
+        hub = None
+        hub_id = entry.data.get(CONF_HUB_ENTRY_ID)
+        if hub_id:
+            hub = hass.config_entries.async_get_entry(hub_id)
+        extra["auth"] = auth_health_snapshot(hub)
+    if "ems" not in extra:
+        extra["ems"] = ems_health_snapshot(hass)
 
     return build_device_snapshot(
         entry=entry,
@@ -401,6 +462,16 @@ async def async_build_hub_diagnostics(
             "retries": lan_settings.retries,
             "retry_delay": lan_settings.retry_delay,
             "max_concurrent": lan_settings.max_concurrent,
+        },
+        "auth": auth_health_snapshot(entry),
+        "ems": ems_health_snapshot(hass),
+        "behavior": {
+            "mold_dry": MOLD_DRY_BEHAVIOR,
+            "default_control_mode": "hybrid",
+            "hybrid_note": (
+                "Default hybrid uses EMS for writes when available "
+                "(cloud egress); LAN-first for reads."
+            ),
         },
         "linked_devices": linked,
         "linked_device_count": len(linked),

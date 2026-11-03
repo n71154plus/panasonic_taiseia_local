@@ -147,6 +147,9 @@ async def _async_setup_hub(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     username = (entry.data.get(CONF_USERNAME) or "").strip()
     if username and credentials_rejected(username):
+        from .observability import async_create_ems_reauth_issue
+
+        await async_create_ems_reauth_issue(hass, entry)
         raise ConfigEntryAuthFailed(
             credentials_reject_reason(username)
             or "EMS credentials rejected; reauthentication required"
@@ -866,6 +869,22 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 except Exception as err:  # noqa: BLE001
                     _LOGGER.debug("cloud power report failed: %s", err)
 
+            from .observability import (
+                auth_health_snapshot,
+                control_health_snapshot,
+                ems_health_snapshot,
+            )
+
+            hub_for_auth = None
+            hub_id = live_data.get(CONF_HUB_ENTRY_ID)
+            if hub_id:
+                hub_for_auth = hass.config_entries.async_get_entry(hub_id)
+            control_snap = control_health_snapshot(
+                control=control, entry=live_entry, cloud_only=cloud_only
+            )
+            control_snap["last_path"] = path or control.last_path
+            control_snap["lan_ok"] = bool(lan_ok and control.lan_ok)
+
             return {
                 "status": status,
                 "device": client.device,
@@ -883,7 +902,11 @@ async def _async_setup_device(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     live_entry, cloud_only=cloud_only
                 ),
                 "control_path": path,
+                "control": control_snap,
+                "auth": auth_health_snapshot(hub_for_auth),
+                "ems": ems_health_snapshot(hass),
                 "cloud_only": cloud_only,
+                "lan_ok": control_snap["lan_ok"],
                 "energy_total_kwh": energy_tracker.total_kwh,
                 "energy_monthly_kwh": energy_tracker.period_kwh,
                 "energy_period_kwh": energy_tracker.period_kwh,

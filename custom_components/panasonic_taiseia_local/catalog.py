@@ -59,7 +59,8 @@ _AC_SERVICE_KIND: dict[int, str] = {
     0x12: "binary_sensor",  # 濾網
     0x15: "sensor",  # 系統點檢
     0x16: "switch",  # 空氣偵測
-    0x17: "switch",  # 乾燥防霉
+    0x17: "switch",  # 乾燥防霉（多數機種）
+    0x56: "switch",  # 乾燥防霉（UX/VX CommandList）；AC only — DH 0x56 is PM1.0
     0x22: "sensor",
     0x23: "sensor",
     0x24: "sensor",

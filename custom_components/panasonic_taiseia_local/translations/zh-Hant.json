@@ -10,7 +10,7 @@
       },
       "account": {
         "title": "登入 Panasonic EMS",
-        "description": "{hint}",
+        "description": "{hint} 預設控制為混合模式（可用時走 EMS 寫入）。官方「關機後乾燥防霉」需雲端關機且偏好開啟；實測模組上僅本地關機不會啟動該流程。",
         "data": {
           "username": "帳號（Email）",
           "password": "密碼"
@@ -101,9 +101,15 @@
           "energy_reset_weekday": "每週星期幾歸零（僅每週週期）",
           "energy_reset_period": "立即重置本期耗電",
           "energy_reset_total": "立即重置累計耗電",
-          "control_mode": "控制路徑（混合＝寫雲端優先／讀本地優先）"
+          "control_mode": "控制路徑（混合＝寫雲端優先／讀本地優先，會連 EMS；僅本地＝純區網，官方關機乾燥防霉需走雲端）"
         }
       }
+    }
+  },
+  "issues": {
+    "ems_credentials_rejected": {
+      "title": "Panasonic EMS 密碼已被拒絕（{title}）",
+      "description": "帳號 {account} 的儲存密碼已被 EMS 拒絕，整合已停止自動重試。請由此修復流程重新驗證主設定，並輸入與官方 App 相同的目前密碼。"
     }
   },
   "services": {

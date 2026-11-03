@@ -99,6 +99,10 @@ class EmsGate:
     def apply_settings(self, settings: EmsSettings) -> None:
         self.settings = settings
 
+    def queue_depth(self) -> int:
+        """Approximate pending EMS calls (diagnostics only)."""
+        return int(self._queue.qsize())
+
     async def run(
         self,
         coro_factory,
@@ -252,6 +256,27 @@ class EmsTransport:
     def in_cooldown(self) -> bool:
         now = time.monotonic()
         return all(self._blocked_until.get(b, 0) > now for b in self.settings.base_urls)
+
+    def cooldown_snapshot(self) -> dict[str, Any]:
+        """Read-only EMS base health for diagnostics / support."""
+        now = time.monotonic()
+        bases = []
+        for base in self.settings.base_urls:
+            until = float(self._blocked_until.get(base, 0) or 0)
+            remaining = max(0.0, until - now)
+            bases.append(
+                {
+                    "base": base,
+                    "blocked": remaining > 0,
+                    "cooldown_remaining_s": round(remaining, 1),
+                }
+            )
+        return {
+            "in_cooldown": self.in_cooldown(),
+            "bases": bases,
+            "min_interval_s": self.settings.min_interval,
+            "timeout_s": self.settings.timeout,
+        }
 
     async def request(
         self,

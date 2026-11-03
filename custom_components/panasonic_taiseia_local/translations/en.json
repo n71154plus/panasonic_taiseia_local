@@ -10,7 +10,7 @@
       },
       "account": {
         "title": "Sign in to Panasonic EMS",
-        "description": "{hint}",
+        "description": "{hint} Default device control is hybrid (EMS writes when available). Official 乾燥防霉 after power-off needs cloud OFF with the preference switch on — LAN-only OFF does not start that cycle on tested modules.",
         "data": {
           "username": "Account (email)",
           "password": "Password"
@@ -101,9 +101,15 @@
           "energy_reset_weekday": "Weekday to reset (weekly only)",
           "energy_reset_period": "Reset period energy now",
           "energy_reset_total": "Reset total energy now",
-          "control_mode": "Control path (hybrid = cloud-first write / LAN-first read)"
+          "control_mode": "Control path (hybrid = cloud write first / LAN read first; uses EMS so expect cloud egress. local = LAN only — official mold-dry after OFF needs cloud)"
         }
       }
+    }
+  },
+  "issues": {
+    "ems_credentials_rejected": {
+      "title": "Panasonic EMS password rejected ({title})",
+      "description": "The stored password for {account} was rejected by EMS. Password retries have been stopped. Open the repair flow to reauthenticate the hub with the current official-app password."
     }
   },
   "services": {

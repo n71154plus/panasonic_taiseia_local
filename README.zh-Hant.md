@@ -3,23 +3,34 @@
 Home Assistant 自訂整合：控制配備 **TaiSEIA** 的 Panasonic 家電，支援**區網 LAN**與台灣 **EMS 雲端**，並可**每機選擇**控制路徑。
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Release](https://img.shields.io/github/v/release/n71154plus/panasonic_taiseia_local?label=v1.7.9)](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.9)
+[![Release](https://img.shields.io/github/v/release/n71154plus/panasonic_taiseia_local?label=v1.7.10)](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.10)
 [![Validate](https://github.com/n71154plus/panasonic_taiseia_local/actions/workflows/validate.yml/badge.svg)](https://github.com/n71154plus/panasonic_taiseia_local/actions/workflows/validate.yml)
 
 > **English:** [README.md](README.md)
 
-## 最新版本 v1.7.9 變更摘要
+## 最新版本 v1.7.10 變更摘要
 
-- **EMS 密碼失效停止重試：** 官網帳號密碼被拒（改密、鎖定）時，不再每 30 秒用舊密碼重登。改為鎖定該帳號的密碼登入、對 hub 啟動重新驗證流程（`async_step_reauth`），網路／限流錯誤仍可退避重試。
+- **可觀測失敗：** diagnostics／probe 露出 `lan_ok`、控制路徑、EMS 冷卻與帳號狀態；EMS 密碼被拒時建立 HA Repair。
+- **官方行為誠實對齊：** 文件與設定說明寫清 hybrid 會走雲端；乾燥防霉官方路徑是「偏好開＋雲端關機」；UX/VX 偏好服務 `0x56`。
+- **回歸測試：** 補強 hybrid 離線、帳號閘門、diagnostics 健康欄位。
 
-完整說明見 [Release v1.7.9](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.9)。
+完整說明見 [Release v1.7.10](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.10)。
+
+## 官方行為對齊（請先讀）
+
+- **預設 hybrid：** 寫入優先 EMS（會出外網），讀取優先區網。若你的資安政策禁止雲端控制，請改「僅本地」。
+- **乾燥防霉：** 官方 App 是偏好開關（多數 `0x17`，UX/VX `0x56`）＋**雲端關機**後由機內執行。實測 RX-20xxxA06 上本地 `0x00=0` 不會啟動正式乾燥；`0x00=2/3` 被拒絕。僅本地模式沒有官方同等指令。
 
 ## 更新紀錄
 
+### v1.7.10
+
+- 見上方「最新版本 v1.7.10 變更摘要」。
+
 ### v1.7.9
 
-- 見上方「最新版本 v1.7.9 變更摘要」。
-- 另含 PR #21：hybrid 且無雲備援時，LAN 斷線可正確進入 offline／port-check 並自動恢復。
+- **EMS 密碼失效停止重試：** 密碼被拒時停止重登、hub reauth；網路／限流仍可退避重試。
+- 另含 PR #21：hybrid 且無雲備援時，LAN 斷線可 offline／port-check 並自動恢復。
 
 ### v1.7.8
 
@@ -203,7 +214,7 @@ Home Assistant 自訂整合：控制配備 **TaiSEIA** 的 Panasonic 家電，�
 將 `climate.livingroom` 換成你的實體 ID：
 
 ```yaml
-type: custom:n71154-device-card
+type: custom:device-hub-card
 entity: climate.livingroom
 layout: standard          # standard | mini | bar
 language: zh-TW           # auto | en | zh-TW | zh-CN | ja
@@ -213,7 +224,7 @@ disable_popup: false      # false = 右上角開啟同裝置彈出層
 精簡列：
 
 ```yaml
-type: custom:n71154-device-card
+type: custom:device-hub-card
 entity: climate.bedroom
 layout: mini
 language: zh-TW
@@ -222,7 +233,7 @@ language: zh-TW
 彈出層可過濾 domain／實體（例如只留感測與開關）：
 
 ```yaml
-type: custom:n71154-device-card
+type: custom:device-hub-card
 entity: climate.livingroom
 language: zh-TW
 include_domains: sensor,switch,select,number

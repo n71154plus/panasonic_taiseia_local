@@ -123,6 +123,9 @@ async def async_trigger_hub_reauth(
         "EMS credentials for %s rejected; starting reauthentication",
         hub.title or account,
     )
+    from .observability import async_create_ems_reauth_issue
+
+    await async_create_ems_reauth_issue(hass, hub)
     hub.async_start_reauth(hass)
 
 

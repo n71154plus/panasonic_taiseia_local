@@ -228,6 +228,9 @@ class TaiSeiaConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     await self.async_set_unique_id(f"hub:{username.lower()}")
                     self._abort_if_unique_id_mismatch(reason="unique_id_mismatch")
                 clear_credentials_rejected(username)
+                from .observability import async_delete_ems_reauth_issue
+
+                await async_delete_ems_reauth_issue(self.hass, hub.entry_id)
                 return self.async_update_reload_and_abort(
                     hub,
                     data_updates={
@@ -900,6 +903,9 @@ class HubOptionsFlowHandler(config_entries.OptionsFlow):
                     new_data[CONF_CP_TOKEN] = cloud.cp_token
                     new_data[CONF_REFRESH_TOKEN] = cloud.refresh_token
                     clear_credentials_rejected(new_data.get(CONF_USERNAME, ""))
+                    from .observability import async_delete_ems_reauth_issue
+
+                    await async_delete_ems_reauth_issue(self.hass, entry.entry_id)
                 except Exception:  # noqa: BLE001
                     return self.async_show_form(
                         step_id="init",

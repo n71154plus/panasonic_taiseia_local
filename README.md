@@ -3,23 +3,34 @@
 Home Assistant custom integration for **Panasonic TaiSEIA** appliances — **LAN and/or Taiwan EMS cloud**, with a per-device control path you can choose.
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Release](https://img.shields.io/github/v/release/n71154plus/panasonic_taiseia_local?label=v1.7.9)](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.9)
+[![Release](https://img.shields.io/github/v/release/n71154plus/panasonic_taiseia_local?label=v1.7.10)](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.10)
 [![Validate](https://github.com/n71154plus/panasonic_taiseia_local/actions/workflows/validate.yml/badge.svg)](https://github.com/n71154plus/panasonic_taiseia_local/actions/workflows/validate.yml)
 
 > **Traditional Chinese:** [README.zh-Hant.md](README.zh-Hant.md)
 
-## What's new in v1.7.9
+## What's new in v1.7.10
 
-- **Stop retrying a rejected EMS password:** when the stored account password stops working (changed in the official app, account locked), the integration no longer re-posts it every poll. Password login is gated, the hub starts a reauthentication flow (`async_step_reauth`), and network / rate-limit errors still retry with backoff.
+- **Observable failures:** diagnostics / probe expose `lan_ok`, control path, EMS cooldown, and credential health; rejected EMS passwords create a HA Repair.
+- **Honest App parity:** docs and options state that hybrid uses EMS (cloud egress); official mold-dry needs preference ON + cloud power-off; UX/VX preference is `0x56`.
+- **Regression tests:** coverage for hybrid offline, credential gating, and diagnostics health fields.
 
-Full notes: [Release v1.7.9](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.9).
+Full notes: [Release v1.7.10](https://github.com/n71154plus/panasonic_taiseia_local/releases/tag/v1.7.10).
+
+## Official behavior (read this)
+
+- **Default hybrid:** writes prefer EMS (cloud egress); reads prefer LAN. Use **local** if policy forbids cloud control.
+- **Mold dry (乾燥防霉):** the official app is a preference switch (usually `0x17`, UX/VX `0x56`) plus **cloud power-off**. On tested RX-20xxxA06 modules, LAN `0x00=0` does not start that cycle; `0x00=2/3` are rejected. There is no official local-only start command.
 
 ## Changelog
 
+### v1.7.10
+
+- See **What's new in v1.7.10** above.
+
 ### v1.7.9
 
-- See **What's new in v1.7.9** above.
-- Also includes PR #21: hybrid entries without cloud recover via the LAN offline / port-check path after a module power loss.
+- **Stop retrying a rejected EMS password:** gate `/userlogin1`, hub reauth; network / rate-limit still backoff.
+- Also includes PR #21: hybrid without cloud recovers via LAN offline / port-check.
 
 ### v1.7.8
 
@@ -204,7 +215,7 @@ AC and dehumidifier devices expose many entities on one HA device (setpoint, swi
 Replace `climate.livingroom` with your entity ID:
 
 ```yaml
-type: custom:n71154-device-card
+type: custom:device-hub-card
 entity: climate.livingroom
 layout: standard          # standard | mini | bar
 language: en              # auto | en | zh-TW | zh-CN | ja
@@ -214,7 +225,7 @@ disable_popup: false      # false = top-right opens same-device popup
 Compact row:
 
 ```yaml
-type: custom:n71154-device-card
+type: custom:device-hub-card
 entity: climate.bedroom
 layout: mini
 language: en
@@ -223,7 +234,7 @@ language: en
 Optional popup filters (e.g. sensors + controls only):
 
 ```yaml
-type: custom:n71154-device-card
+type: custom:device-hub-card
 entity: climate.livingroom
 language: en
 include_domains: sensor,switch,select,number

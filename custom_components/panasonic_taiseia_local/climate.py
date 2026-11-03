@@ -215,7 +215,11 @@ class TaiSeiaClimate(TaiSeiaBaseEntity, ClimateEntity):
         attrs: dict[str, Any] = {
             "control_mode": data.get("control_mode"),
             "control_path": data.get("control_path"),
+            "lan_ok": data.get("lan_ok"),
         }
+        auth = data.get("auth") or {}
+        if isinstance(auth, dict) and auth.get("credentials_ok") is not None:
+            attrs["ems_credentials_ok"] = auth.get("credentials_ok")
         if raw is not None:
             attrs["mode_code"] = raw
             label = self._mode_label(raw)
